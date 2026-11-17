@@ -41,22 +41,28 @@ const server=http.createServer((req,res)=>{
   await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:8765/') ? route.continue():route.abort());
   try {
     await page.goto('http://127.0.0.1:8765/',{waitUntil:'domcontentloaded'});
-    await page.waitForFunction(()=>window.System&&System.get('chunks:///_virtual/KeyListener.ts')?.KeyListener?.cp,{timeout:180000});
+    await page.waitForFunction(()=>window.System&&System.get('chunks:///_virtual/KeyListener.ts')?.KeyListener?.cp,null,{timeout:180000});
     await page.waitForTimeout(15000);
     await page.screenshot({path:path.join(output,'01-loaded.png')});
     // Fresh profiles display the official update notes in a DOM modal above the canvas.
-    const closeNotes = page.locator('button').filter({hasText:/^[×✕✖]$/});
-    if (await closeNotes.count()) await closeNotes.first().click();
-    else await page.evaluate(()=>window.electronAPI?.closeUpdateWindow?.());
+    console.log('Visible HTML controls:',JSON.stringify(await page.locator('button').evaluateAll(nodes=>nodes.map(n=>({text:n.textContent.trim(),visible:!!n.getClientRects().length})))));
+    const closeNotes = page.getByText(/^[×✕✖]$/);
+    let closed=false;
+    for(let i=0;i<await closeNotes.count();i++) {
+      if(await closeNotes.nth(i).isVisible()) {await closeNotes.nth(i).click();closed=true;break;}
+    }
+    // Some host shims return an unresolved IPC promise in a plain browser. Do not await it.
+    if(!closed)await page.evaluate(()=>{window.electronAPI?.closeUpdateWindow?.();});
+    console.log('Update modal close dispatched:',closed);
     const before=await page.evaluate(()=>({touch:PvzDirectTouch.state(),
       scene:System.get(System.resolve('cc')).director.getScene()?.name,
       player:!!System.get('chunks:///_virtual/PlayerProperties.ts')?.AllPlayerProperties?.currentPlayer}));
     console.log('Loaded official game:',JSON.stringify(before));
-    await page.evaluate(async()=>{
+    await Promise.race([page.evaluate(async()=>{
       const K=System.get('chunks:///_virtual/KeyListener.ts').KeyListener;
       await K.goToLevel(['tutorial1'],[],false,false);
-    });
-    await page.waitForFunction(()=>window.PvzDirectTouch.state().ready,{timeout:120000});
+    }),new Promise((_,reject)=>setTimeout(()=>reject(Error('Tutorial transition timed out')),90000).unref())]);
+    await page.waitForFunction(()=>window.PvzDirectTouch.state().ready,null,{timeout:120000});
     await page.waitForTimeout(2000);
     await page.screenshot({path:path.join(output,'02-tutorial.png')});
     const info=await page.evaluate(()=>{
