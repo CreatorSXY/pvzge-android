@@ -46,14 +46,13 @@ const server=http.createServer((req,res)=>{
     await page.screenshot({path:path.join(output,'01-loaded.png')});
     // Fresh profiles display the official update notes in a DOM modal above the canvas.
     console.log('Visible HTML controls:',JSON.stringify(await page.locator('button').evaluateAll(nodes=>nodes.map(n=>({text:n.textContent.trim(),visible:!!n.getClientRects().length})))));
-    const closeNotes = page.getByText(/^[×✕✖]$/);
-    let closed=false;
-    for(let i=0;i<await closeNotes.count();i++) {
-      if(await closeNotes.nth(i).isVisible()) {await closeNotes.nth(i).click();closed=true;break;}
-    }
-    // Some host shims return an unresolved IPC promise in a plain browser. Do not await it.
-    if(!closed)await page.evaluate(()=>{window.electronAPI?.closeUpdateWindow?.();});
-    console.log('Update modal close dispatched:',closed);
+    const htmlButtons=await page.locator('button').all();
+    const visibleButtons=[];
+    for(const button of htmlButtons)if(await button.isVisible())visibleButtons.push(button);
+    // The official modal close is an SVG-only button (no text/accessible name).
+    if(visibleButtons.length!==1)throw Error('Expected the one visible official update close button');
+    await visibleButtons[0].click();
+    console.log('Closed official update notes');
     const before=await page.evaluate(()=>({touch:PvzDirectTouch.state(),
       scene:System.get(System.resolve('cc')).director.getScene()?.name,
       player:!!System.get('chunks:///_virtual/PlayerProperties.ts')?.AllPlayerProperties?.currentPlayer}));
@@ -63,9 +62,13 @@ const server=http.createServer((req,res)=>{
       await K.goToLevel(['tutorial1'],[],false,false);
     }),new Promise((_,reject)=>setTimeout(()=>reject(Error('Tutorial transition timed out')),90000).unref())]);
     await page.waitForFunction(()=>window.PvzDirectTouch.state().ready,null,{timeout:120000});
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(()=>{
+      const U=System.get('chunks:///_virtual/UI.ts')?.UIInGame.component;
+      return U?.cards?.CFs.some(cf=>cf.ca.getSelectable());
+    },null,{timeout:30000});
+    await page.waitForTimeout(500);
     await page.screenshot({path:path.join(output,'02-tutorial.png')});
-    const info=await page.evaluate(()=>{
+    const resolveTargets=()=>{
       const cc=System.get(System.resolve('cc'));
       const U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;
       const S=System.get('chunks:///_virtual/Square.ts').Square;
@@ -89,7 +92,14 @@ const server=http.createServer((req,res)=>{
       const delta={x:M.position.x-M.positionOrg.x,y:M.position.y-M.positionOrg.y};
       const cellPoint=css({x:world.x-delta.x,y:world.y-delta.y});
       window.__touchSmoke={U,S,cell,card,cardPoint,cellPoint,before:cell.getAllPlants().length};
-      return {card,cardPoint,cellPoint,selectable:U.cards.CFs[card].ca.getSelectable(),state:PvzDirectTouch.state()};
+      return {card,cardPoint,cellPoint,selectable:U.cards.CFs[card].ca.getSelectable(),
+        cost:U.cards.CFs[card].SUNCOST,sun:System.get('chunks:///_virtual/SunCount.ts').SunCount.Value,
+        state:PvzDirectTouch.state()};
+    };
+    const info=await page.evaluate(resolveTargets);
+    await page.evaluate(()=>{
+      window.__plantingMouseEvents=0;
+      document.getElementById('GameCanvas').addEventListener('mousedown',()=>window.__plantingMouseEvents++);
     });
     console.log('Touch targets:',JSON.stringify(info));
     const hit = await page.evaluate(p=>({tag:document.elementFromPoint(p.x,p.y)?.tagName,
@@ -102,14 +112,48 @@ const server=http.createServer((req,res)=>{
     await page.waitForFunction(()=>{
       const t=window.__touchSmoke;return t.cell.getAllPlants().length>t.before;
     },{},{timeout:10000});
-    const after=await page.evaluate(()=>({state:PvzDirectTouch.state(),plants:window.__touchSmoke.cell.getAllPlants().length}));
+    const after=await page.evaluate(()=>({state:PvzDirectTouch.state(),plants:window.__touchSmoke.cell.getAllPlants().length,
+      sun:System.get('chunks:///_virtual/SunCount.ts').SunCount.Value,mouseEvents:window.__plantingMouseEvents}));
+    if(after.mouseEvents!==0)throw Error('Planting still emitted synthetic mouse events');
+    if(after.sun!==info.sun-info.cost)throw Error('Original sun cost was not applied: '+JSON.stringify({info,after}));
     await page.screenshot({path:path.join(output,'03-single-tap-planted.png')});
-    fs.writeFileSync(path.join(output,'state.json'),JSON.stringify({before,info,selected,after},null,2));
+    // Reload the tutorial for a clean drag scenario with normal sun/cooldown state.
+    await Promise.race([page.evaluate(()=>System.get('chunks:///_virtual/KeyListener.ts').KeyListener.goToLevel(['tutorial1'],[],false,false)),
+      new Promise((_,reject)=>setTimeout(()=>reject(Error('Second tutorial transition timed out')),90000).unref())]);
+    await page.waitForFunction(()=>window.PvzDirectTouch.state().ready,null,{timeout:120000});
+    await page.waitForFunction(()=>{
+      const U=System.get('chunks:///_virtual/UI.ts')?.UIInGame.component;
+      return U?.cards?.CFs.some(cf=>cf.ca.getSelectable());
+    },null,{timeout:30000});
+    await page.waitForTimeout(500);
+    const dragInfo=await page.evaluate(resolveTargets);
+    const session=await context.newCDPSession(page);
+    await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:dragInfo.cardPoint.x,y:dragInfo.cardPoint.y,id:1}]});
+    for(let step=1;step<=8;step++) {
+      const t=step/8;
+      await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{
+        x:dragInfo.cardPoint.x+(dragInfo.cellPoint.x-dragInfo.cardPoint.x)*t,
+        y:dragInfo.cardPoint.y+(dragInfo.cellPoint.y-dragInfo.cardPoint.y)*t,id:1}]});
+      await page.waitForTimeout(50);
+    }
+    const preview=await page.evaluate(()=>({state:PvzDirectTouch.state(),plants:window.__touchSmoke.cell.getAllPlants().length}));
+    if(preview.plants!==0)throw Error('Drag planted before finger release');
+    if(preview.state.row!==2||preview.state.column!==0)throw Error('Drag preview on wrong cell');
+    await page.screenshot({path:path.join(output,'04-drag-preview.png')});
+    await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await page.waitForFunction(()=>window.__touchSmoke.cell.getAllPlants().length===1,null,{timeout:10000});
+    const dragAfter=await page.evaluate(()=>({state:PvzDirectTouch.state(),plants:window.__touchSmoke.cell.getAllPlants().length,
+      sun:System.get('chunks:///_virtual/SunCount.ts').SunCount.Value,mouseEvents:window.__plantingMouseEvents}));
+    if(dragAfter.mouseEvents!==0||dragAfter.sun!==dragInfo.sun-dragInfo.cost)throw Error('Drag bypassed game cost or emitted mouse clicks');
+    await page.screenshot({path:path.join(output,'05-drag-planted.png')});
+    if(logs.some(l=>l.type==='pageerror'))throw Error('Game reported a JavaScript error: '+JSON.stringify(logs));
+    fs.writeFileSync(path.join(output,'state.json'),JSON.stringify({before,info,selected,after,dragInfo,preview,dragAfter},null,2));
     console.log('PASS: first lawn tap planted using real game API',JSON.stringify(after));
   } catch(e) {
     await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});
     const diagnostic=await page.evaluate(()=>({state:window.PvzDirectTouch?.state(),
       scene:(window.System && System.get(System.resolve('cc')))?.director.getScene()?.name,
+      cards:(()=>{const U=window.System?.get('chunks:///_virtual/UI.ts')?.UIInGame?.component;return U?.cards?.CFs.map(c=>({type:c.Type,cost:c.SUNCOST,cooling:c.ca.cooling,affordable:c.ca.affordable,disallowed:c.ca.disallowed}));})(),
       nodes:(()=>{const cc=(window.System && System.get(System.resolve('cc')));const scene=cc?.director.getScene();return scene?.children.map(n=>({name:n.name,active:n.activeInHierarchy}));})()})).catch(()=>({}));
     fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({error:String(e),diagnostic},null,2));
     process.exitCode=1;console.error(e);
