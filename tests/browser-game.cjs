@@ -44,6 +44,10 @@ const server=http.createServer((req,res)=>{
     await page.waitForFunction(()=>window.System&&System.get('chunks:///_virtual/KeyListener.ts')?.KeyListener?.cp,{timeout:180000});
     await page.waitForTimeout(15000);
     await page.screenshot({path:path.join(output,'01-loaded.png')});
+    // Fresh profiles display the official update notes in a DOM modal above the canvas.
+    const closeNotes = page.locator('button').filter({hasText:/^[×✕✖]$/});
+    if (await closeNotes.count()) await closeNotes.first().click();
+    else await page.evaluate(()=>window.electronAPI?.closeUpdateWindow?.());
     const before=await page.evaluate(()=>({touch:PvzDirectTouch.state(),
       scene:System.get(System.resolve('cc')).director.getScene()?.name,
       player:!!System.get('chunks:///_virtual/PlayerProperties.ts')?.AllPlayerProperties?.currentPlayer}));
@@ -82,6 +86,9 @@ const server=http.createServer((req,res)=>{
       return {card,cardPoint,cellPoint,selectable:U.cards.CFs[card].ca.getSelectable(),state:PvzDirectTouch.state()};
     });
     console.log('Touch targets:',JSON.stringify(info));
+    const hit = await page.evaluate(p=>({tag:document.elementFromPoint(p.x,p.y)?.tagName,
+      id:document.elementFromPoint(p.x,p.y)?.id}),info.cardPoint);
+    if(hit.id!=='GameCanvas')throw Error('Test target covered by HTML overlay: '+JSON.stringify(hit));
     await page.touchscreen.tap(info.cardPoint.x,info.cardPoint.y);
     const selected=await page.evaluate(()=>PvzDirectTouch.state());
     if(selected.selected!==info.card)throw Error('Touch did not directly select card: '+JSON.stringify(selected));
