@@ -45,7 +45,7 @@ const server=http.createServer((req,res)=>{
     await page.waitForTimeout(15000);
     await page.screenshot({path:path.join(output,'01-loaded.png')});
     const before=await page.evaluate(()=>({touch:PvzDirectTouch.state(),
-      scene:System.get('cc').director.getScene()?.name,
+      scene:System.get(System.resolve('cc')).director.getScene()?.name,
       player:!!System.get('chunks:///_virtual/PlayerProperties.ts')?.AllPlayerProperties?.currentPlayer}));
     console.log('Loaded official game:',JSON.stringify(before));
     await page.evaluate(async()=>{
@@ -56,7 +56,7 @@ const server=http.createServer((req,res)=>{
     await page.waitForTimeout(2000);
     await page.screenshot({path:path.join(output,'02-tutorial.png')});
     const info=await page.evaluate(()=>{
-      const cc=System.get('cc');
+      const cc=System.get(System.resolve('cc'));
       const U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;
       const S=System.get('chunks:///_virtual/Square.ts').Square;
       const M=System.get('chunks:///_virtual/Mouse.ts').Mouse;
@@ -96,8 +96,8 @@ const server=http.createServer((req,res)=>{
   } catch(e) {
     await page.screenshot({path:path.join(output,'failure.png')}).catch(()=>{});
     const diagnostic=await page.evaluate(()=>({state:window.PvzDirectTouch?.state(),
-      scene:window.System?.get('cc')?.director.getScene()?.name,
-      nodes:(()=>{const cc=window.System?.get('cc');const scene=cc?.director.getScene();return scene?.children.map(n=>({name:n.name,active:n.activeInHierarchy}));})()})).catch(()=>({}));
+      scene:(window.System && System.get(System.resolve('cc')))?.director.getScene()?.name,
+      nodes:(()=>{const cc=(window.System && System.get(System.resolve('cc')));const scene=cc?.director.getScene();return scene?.children.map(n=>({name:n.name,active:n.activeInHierarchy}));})()})).catch(()=>({}));
     fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({error:String(e),diagnostic},null,2));
     process.exitCode=1;console.error(e);
   } finally {

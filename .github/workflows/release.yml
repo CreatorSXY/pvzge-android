@@ -71,6 +71,7 @@ jobs:
           mkdir -p ../pvzge_web/docs
           docker cp "$container:/usr/share/nginx/html/." ../pvzge_web/docs/
           python3 scripts/game-source.py --validate ../pvzge_web/docs > game-version.txt
+          node scripts/check-touch-contract.cjs ../pvzge_web/docs/assets/main/index.js
       - uses: actions/setup-java@v4
         if: steps.source.outputs.build == 'true'
         with:
@@ -131,7 +132,7 @@ jobs:
           Path('release-notes.md').write_text(
               'Game version: ' + game + '\n\n'
               'Official web game extracted from `'+source['image']+'`.\n\n'
-              'Android changes: unified touch input; full-resolution default on devices with more than 4 GiB RAM.\n\n'
+              'Android changes: direct game-level card selection and planting; drag preview with placement on release; full-resolution rendering.\n\n'
               'Automated checks pass; Samsung Tab S10+ touch and visual verification is still required.\n\n'
               'Export your save before updating.\n')
           PY
