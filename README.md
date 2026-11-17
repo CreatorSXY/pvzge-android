@@ -1,132 +1,44 @@
-# PvZ2 Gardendless — Android
+# Gardendless Android — CreatorSXY fork
 
-**Plants vs Zombies 2, reimagined as an endless garden — now on Android.**
+This fork fixes touch input ordering and defaults to full resolution on devices with more than 4 GiB RAM. Export saves before testing a new APK.
 
-A native Android wrapper for the [PvZ2 Gardendless](https://github.com/Gzh0821/pvzge_web) web game. No emulation, no cloud streaming — the full game runs locally on your device.
+- Select a plant, then tap the lawn once; dragging is supported.
+- Two-finger tap is right-click; two-finger swipe scrolls.
+- Holding one finger no longer becomes right-click, so holding/dragging a plant does not unexpectedly activate the shovel.
+- Back → Performance → Full resolution restores the full WebView viewport. Existing saved profile choices are retained. This removes wrapper downscaling, but cannot add detail missing from the original art or an engine-limited canvas.
+- In-app updates point to this fork, not the original Android wrapper.
 
-<p align="center">
-  <a href="https://github.com/MrPurple666/pvzge-android/releases/latest"><img src="https://img.shields.io/github/v/release/MrPurple666/pvzge-android?label=latest&color=4CAF50" alt="Latest release"></a>
-  <a href="https://github.com/MrPurple666/pvzge-android/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/MrPurple666/pvzge-android/release.yml?label=CI" alt="Build status"></a>
-  <img src="https://img.shields.io/badge/min%20SDK-27%20(Android%208.1)-5277C3" alt="Min SDK">
-  <img src="https://img.shields.io/badge/size-~1.1%20GB-orange" alt="APK size">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
-</p>
+## Game updates
 
-> **Disclaimer:** This is an unofficial fan port of [PvZ2 Gardendless](https://github.com/Gzh0821/pvzge_web), which is itself an unofficial fan project. Neither project is affiliated with, endorsed by, or connected to PopCap Games, Electronic Arts, or the original Plants vs Zombies development team. All game assets, characters, and trademarks belong to their respective owners. These projects exist for preservation and educational purposes.
+The old `Gzh0821/pvzge_web` endpoint currently returns 404. This fork follows the official `gaozih/pvzge:latest` Docker image linked by the official website instead. The daily workflow resolves an immutable Linux/amd64 image digest, compares it and the wrapper commit to the last release, extracts the web files without running the container, validates the game layout/engine bootstrap, runs checks, and builds an APK. Same-version game changes are detected by digest. Android releases use `GAME_VERSION.BUILD_NUMBER` so wrapper-only updates can also be offered in-app.
 
----
+This follows the **official Docker publication**, whose timing may differ from the live website. Unknown game layouts or failed checks stop publishing. The workflow must be enabled in this fork's Actions tab. The APK contains the game resources for offline play.
 
-## Download
+## Build locally
 
-Get the latest APK from **[GitHub Releases](https://github.com/MrPurple666/pvzge-android/releases/latest)**.
+Requires JDK 17, Android SDK 35 and Docker (for extracting the official game bundle).
 
-> **~1.1 GB** — includes all game assets. No network required after install. The app checks for updates automatically and can install them in-app.
-
-## Controls
-
-The game expects mouse input. Touch gestures are translated automatically:
-
-| You do this | Game sees this | Use for |
-|---|---|---|
-| **Tap / drag** with one finger | Left click + drag | Select plants, place them, drag sun |
-| **Swipe** with two fingers | Scroll wheel | Zoom, browse the plant deck |
-| **Tap** with two fingers | Right click | Shovel, context menus |
-| **Long-press** with one finger | Right click | Same as above, one-handed |
-
-A gesture guide appears on first launch.
-
-## Performance
-
-Press **Back → Performance** during the game to change modes. Changes apply immediately and are saved for the next launch.
-
-| Mode | Frame-rate target | Maximum WebView render edge |
-|---|---|---|
-| Low-end | 30 FPS | 960 px |
-| Balanced | 60 FPS | 1280 px |
-| Original | 60 FPS | Full available size |
-
-Devices reported as low-RAM by Android, or with at most 4 GiB of RAM, default to Low-end. Other devices default to Balanced. An explicit selection takes precedence.
-
-Reduced modes measure the WebView at a smaller size and scale it to the available game area. This reduces the game viewport resolution while keeping the display area and aspect-ratio behavior. Android transforms touch coordinates into the scaled view; the existing touch-to-mouse conversion stays in that view's coordinate space.
-
-The frame-rate limit uses Cocos Game's frame-rate setter, including its native frame pacing and delta-time handling. It does not replace `requestAnimationFrame` or alter simulation timers. The engine bridge is injected into the bundled `application.js` in memory; extracted game files are unchanged. If a future bootstrap or engine API is incompatible, the FPS hook logs a warning and rendering-resolution controls remain available.
-
-These modes address [issue #1](https://github.com/MrPurple666/pvzge-android/issues/1). A target is a cap, not a guaranteed frame rate: CPU-heavy waves, texture memory, temperature and WebView/GPU performance still affect results. FPS gains have not been measured on the reporting device.
-
-## Under the hood
-
-```
-Game (JS/WASM) → WebViewAssetLoader → local files
-Touch input    → MouseGameWebView   → MouseEvent injection
-Rendering      → WebGL2 canvas      → scalable viewport / fullscreen
+```sh
+python3 scripts/game-source.py > build-source.json
+# Use the immutable image value in build-source.json:
+docker pull gaozih/pvzge@sha256:...
+container=$(docker create gaozih/pvzge@sha256:...)
+mkdir -p ../pvzge_web/docs
+docker cp "$container:/usr/share/nginx/html/." ../pvzge_web/docs/
+docker rm "$container"
+python3 scripts/game-source.py --validate ../pvzge_web/docs
+./gradlew assembleDebug
 ```
 
-- **[Cocos Creator 3.8](https://www.cocos.com/creator)** engine compiled to web, running in Android's `WebView`
-- **[WebViewAssetLoader](https://developer.android.com/reference/androidx/webkit/WebViewAssetLoader)** serves files from internal storage — no HTTP server needed
-- **[MouseGameWebView](app/src/main/java/com/pvzge/gardendless/MouseGameWebView.kt)** converts touch → mouse events at the native level
-- **Aspect-ratio fitting and fullscreen** keep the game centered, with selectable render resolution
+## Validation
 
-## Build
-
-```bash
-git clone https://github.com/MrPurple666/pvzge-android.git
-cd pvzge-android
-
-# Make sure the game files are at ../pvzge_web/docs/
-# (clone https://github.com/Gzh0821/pvzge_web if needed)
-
-./gradlew createGameZip   # one-time, ~75s — creates the 1.1 GB game bundle
-./gradlew assembleDebug   # fast — ~12s after the zip exists
+```sh
+node --test tests/*.test.cjs
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-Requires **Java 17** and **Android SDK 35**.
+Tests cover input order, button pairing, drag coordinates, two-finger gestures, cancellation, HTML controls, frame-rate control and resource validation. They do not establish real-device compatibility. Test planting, dragging, shovel, save import/export, pause/resume and image clarity on Samsung Tab S10+ before treating a release as device-verified.
 
-## Automation
+## Upstream
 
-A [GitHub Actions workflow](.github/workflows/release.yml) checks the upstream game version daily. When it changes:
-
-1. Bumps `versionCode` and `versionName`
-2. Builds a signed release APK
-3. Publishes a [GitHub Release](https://github.com/MrPurple666/pvzge-android/releases) with the APK
-
-No manual intervention needed — the release just appears.
-
-## Credits
-
-This project stands on the shoulders of two remarkable efforts:
-
-**[Gzh0821/pvzge_web](https://github.com/Gzh0821/pvzge_web)** — The original PvZ2 Gardendless web version. An extraordinary recreates Plants vs Zombies 2.
-
-**[Cateners/gardendless-android](https://github.com/Cateners/gardendless-android)** — The first Android port that figured out the hard problems: `WebViewAssetLoader` for serving local game files, `MouseGameWebView` for touch→mouse conversion, and 16:9 aspect ratio handling. This project adopts that proven architecture.
-
-## Improvements
-
-Built on the same foundation, with these additions:
-
-| Area | What |
-|---|---|
-| **Reliability** | Atomic extraction with rollback, lifecycle-safe coroutines, retry-on-error dialogs |
-| **UX** | Determinate extraction progress, pre-update save-data warning, gesture tutorial on first launch |
-| **Input** | Horizontal scrolling, long-press for right-click, `ACTION_CANCEL` handling, right-click cursor positioning |
-| **Performance** | Instant touch blocking via HTML injection, GPU darkening disabled, force-dark prevented |
-| **Automation** | CI/CD pipeline auto-builds and releases, in-app updater checks GitHub Releases |
-| **Dev** | `BuildConfig.DEBUG` remote WebView debugging, `onConsoleMessage` logging, `onReceivedError` tracking |
-| **Polish** | Timestamped save exports, version shown during extraction, `resizeableActivity=false` for layout stability |
-
-## FAQ
-
-**Why is the APK so large?**  
-It includes all game assets (~1.2 GB of textures, sounds, and animations). This means the game runs entirely offline after install — no additional downloads, no waiting.
-
-**Will my save data survive an update?**  
-Probably, but game version changes can occasionally break save compatibility. You'll see a warning before updating, and we recommend exporting your save first (in-game option).
-
-**Why not on the Play Store?**  
-The game is a fan project using copyrighted material. It's distributed via GitHub Releases to avoid store takedowns.
-
-**Can I use a controller?**  
-Not yet — the game is touch/mouse only. The touch→mouse conversion handles all input.
-
-## License
-
-GPL-3.0. The game files from [Gzh0821/pvzge_web](https://github.com/Gzh0821/pvzge_web) carry their own license.
+Forked from [MrPurple666/pvzge-android](https://github.com/MrPurple666/pvzge-android), based on Caten Hu's Android port. Game by Gzh0821. Original notices are retained in source files. Android wrapper: GPL-3.0; game code and third-party assets retain their respective rights and licenses.

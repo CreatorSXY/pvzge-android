@@ -68,7 +68,13 @@ android {
 val createGameZip by tasks.registering(Zip::class) {
     group = "game"
     description = "Creates pvzge_web.zip from ../pvzge_web/docs (run once, ~2 min)"
-    from(rootProject.file("../pvzge_web/docs"))
+    val gameDir = rootProject.file("../pvzge_web/docs")
+    from(gameDir)
+    doFirst {
+        require(gameDir.resolve("index.html").isFile && gameDir.resolve("assets").isDirectory) {
+            "Missing web game resources: extract the official game image to ../pvzge_web/docs first"
+        }
+    }
     archiveFileName.set("pvzge_web.zip")
     destinationDirectory.set(file("src/main/assets"))
     exclude(".nojekyll", "CNAME")

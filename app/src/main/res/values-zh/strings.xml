@@ -10,7 +10,7 @@
     <string name="extraction_error">解压失败。请检查存储空间后重试。</string>
     <string name="retry">重试</string>
     <string name="close_app">关闭</string>
-    <string name="gesture_click">单击 = 点击</string>
+    <string name="gesture_click">点击选卡，再单击种植；也可拖动种植</string>
     <string name="gesture_scroll">双指滑动 = 滚轮</string>
     <string name="gesture_rightclick">双指点击 = 右键</string>
     <string name="longpress_rightclick">长按 = 右键</string>
@@ -32,6 +32,6 @@
     <string name="performance_title">性能</string>
     <string name="performance_low">低配置 · 目标 30 FPS · 低分辨率</string>
     <string name="performance_balanced">均衡 · 目标 60 FPS · 降低分辨率</string>
-    <string name="performance_original">原始 · 目标 60 FPS · 完整分辨率</string>
+    <string name="performance_original">清晰 · 目标 60 FPS · 完整分辨率（适合平板）</string>
     <string name="performance_apply">应用</string>
 </resources>

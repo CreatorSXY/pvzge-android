@@ -10,9 +10,11 @@ public final class RenderSizeTest {
         check(800, 450, 960, 800, 450);
         check(1080, 2400, 960, 432, 960);
         check(2052, 1080, 960, 960, 505);
+        check(2800, 1752, 0, 2800, 1752);
+        check(2800, 1752, 1280, 1280, 800);
         check(0, 0, 960, 0, 0);
         check(1, Integer.MAX_VALUE, 960, 1, 960);
-        System.out.println("8 render size cases passed");
+        System.out.println("10 render size cases passed");
     }
 
     private static void check(int w, int h, int max, int expectedW, int expectedH) {

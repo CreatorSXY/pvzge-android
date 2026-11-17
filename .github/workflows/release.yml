@@ -8,79 +8,114 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-
-      - name: Fetch upstream game version
-        id: upstream
+          node-version: '22'
+      - name: Input and bridge regression checks
         run: |
-          HTML=$(curl --fail --silent --show-error --location "https://raw.githubusercontent.com/Gzh0821/pvzge_web/refs/heads/master/docs/index.html")
-          VERSION=$(echo "$HTML" | grep -oP '(?<=PvZ2 Gardendless Online \| )[\d.]+(?=</title>)')
-          echo "Upstream version: $VERSION"
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Compare with latest tag
-        id: version
+          node --test tests/*.test.cjs
+          python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Resolve official game image and compare release
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          UPSTREAM="${{ steps.upstream.outputs.VERSION }}"
-          LATEST_TAG=$(git tag --sort=-v:refname | head -1 | sed 's/^v//')
-          echo "Upstream: $UPSTREAM"
-          echo "Latest tag: ${LATEST_TAG:-none}"
-          if [ "$UPSTREAM" = "$LATEST_TAG" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "Version unchanged — skipping"
-            echo "BUILD=false" >> $GITHUB_OUTPUT
-          else
-            echo "New version: $UPSTREAM (was: ${LATEST_TAG:-none})"
-            echo "BUILD=true" >> $GITHUB_OUTPUT
-          fi
-
+          python3 scripts/game-source.py > build-source.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          source = json.loads(Path('build-source.json').read_text())
+          source['wrapper_sha'] = os.environ['GITHUB_SHA']
+          Path('build-source.json').write_text(json.dumps(source, indent=2))
+          PY
+          # No release yet is expected on a new fork; other API errors must fail.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=1" > releases.json
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          source = json.loads(Path('build-source.json').read_text())
+          releases = json.loads(Path('releases.json').read_text())
+          previous = None
+          if releases:
+              asset = next((a for a in releases[0]['assets'] if a['name'] == 'build-source.json'), None)
+              if asset:
+                  with urllib.request.urlopen(asset['browser_download_url'], timeout=30) as r:
+                      previous = json.load(r)
+          build = source != previous or os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('build=' + str(build).lower() + '\nimage=' + source['image'] + '\n')
+          PY
+      - name: Extract official web game without running the image
+        if: steps.source.outputs.build == 'true'
+        env:
+          GAME_IMAGE: ${{ steps.source.outputs.image }}
+        run: |
+          docker pull --platform linux/amd64 "$GAME_IMAGE"
+          container=$(docker create --platform linux/amd64 "$GAME_IMAGE")
+          trap 'docker rm "$container"' EXIT
+          mkdir -p ../pvzge_web/docs
+          docker cp "$container:/usr/share/nginx/html/." ../pvzge_web/docs/
+          python3 scripts/game-source.py --validate ../pvzge_web/docs > game-version.txt
       - uses: actions/setup-java@v4
-        if: steps.version.outputs.BUILD == 'true'
+        if: steps.source.outputs.build == 'true'
         with:
           java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        if: steps.version.outputs.BUILD == 'true'
+          distribution: temurin
+      - name: Java regression checks
+        if: steps.source.outputs.build == 'true'
         run: |
-          ANDROID_HOME=/usr/local/lib/android/sdk
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
-
-      - name: Clone upstream game files
-        if: steps.version.outputs.BUILD == 'true'
-        run: git clone --depth 1 https://github.com/Gzh0821/pvzge_web.git ../pvzge_web
-
-      - name: Update version
-        if: steps.version.outputs.BUILD == 'true'
+          mkdir -p /tmp/pvzge-tests
+          javac -d /tmp/pvzge-tests app/src/main/java/com/pvzge/gardendless/{UpdateVersion,RenderSize}.java tests/{UpdateVersionTest,RenderSizeTest}.java
+          java -cp /tmp/pvzge-tests com.pvzge.gardendless.UpdateVersionTest
+          java -cp /tmp/pvzge-tests com.pvzge.gardendless.RenderSizeTest
+      - name: Set Android build version
+        id: version
+        if: steps.source.outputs.build == 'true'
         run: |
-          V="${{ steps.upstream.outputs.VERSION }}"
-          CURRENT_CODE=$(grep -oP 'versionCode\s*=\s*\K\d+' app/build.gradle.kts)
-          NEW_CODE=$((1000 + GITHUB_RUN_NUMBER))
-          test "$NEW_CODE" -gt "$CURRENT_CODE"
-          sed -i "s/versionCode = $CURRENT_CODE/versionCode = $NEW_CODE/" app/build.gradle.kts
-          sed -i "s/versionName = \".*\"/versionName = \"$V\"/" app/build.gradle.kts
-          echo "versionCode $CURRENT_CODE -> $NEW_CODE, versionName -> $V"
-
-      - name: Build APK
-        if: steps.version.outputs.BUILD == 'true'
-        run: ./gradlew assembleRelease --no-daemon
-
-      - name: Create release
-        if: steps.version.outputs.BUILD == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.upstream.outputs.VERSION }}
-          name: v${{ steps.upstream.outputs.VERSION }}
-          body: |
-            Auto-built from upstream [PvZ2 Gardendless Online ${{ steps.upstream.outputs.VERSION }}](https://github.com/Gzh0821/pvzge_web).
-
-            APK includes all game assets — no network required after install.
-          files: app/build/outputs/apk/release/app-release.apk
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          game = Path('game-version.txt').read_text().strip()
+          code = 20000 + int(os.environ['GITHUB_RUN_NUMBER'])
+          version = game + '.' + str(code)
+          path = Path('app/build.gradle.kts')
+          source = re.sub(r'versionCode = \d+', 'versionCode = ' + str(code), path.read_text())
+          source = re.sub(r'versionName = "[^"]+"', 'versionName = "' + version + '"', source)
+          path.write_text(source)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('name=' + version + '\n')
+          PY
+      - name: Compile, lint and package APK
+        if: steps.source.outputs.build == 'true'
+        run: ./gradlew :app:assembleRelease :app:lintRelease --no-daemon
+      - name: Publish APK with source provenance
+        if: steps.source.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          source = json.loads(Path('build-source.json').read_text())
+          game = Path('game-version.txt').read_text().strip()
+          Path('release-notes.md').write_text(
+              'Game version: ' + game + '\n\n'
+              'Official web game extracted from `'+source['image']+'`.\n\n'
+              'Android changes: unified touch input; full-resolution default on devices with more than 4 GiB RAM.\n\n'
+              'Automated checks pass; Samsung Tab S10+ touch and visual verification is still required.\n\n'
+              'Export your save before updating.\n')
+          PY
+          gh release create "v$RELEASE_VERSION" --title "Gardendless Android $RELEASE_VERSION" \
+            --target "$GITHUB_SHA" --notes-file release-notes.md \
+            app/build/outputs/apk/release/app-release.apk build-source.json

@@ -45,8 +45,9 @@ import java.util.zip.ZipInputStream
 
 class GameActivity : AppCompatActivity() {
 
-    @Volatile private var performanceMode: PerformanceMode = PerformanceMode.BALANCED
+    @Volatile private var performanceMode: PerformanceMode = PerformanceMode.ORIGINAL
     private lateinit var performanceScript: String
+    private lateinit var inputScript: String
     private var performanceDialog: android.app.Dialog? = null
     private var webviewReady = false
     private lateinit var aspectContainer: AspectRatioFrameLayout
@@ -73,6 +74,7 @@ class GameActivity : AppCompatActivity() {
         setupFullScreen()
         performanceMode = PerformanceMode.load(this)
         performanceScript = assets.open("android-performance.js").bufferedReader().use { it.readText() }
+        inputScript = assets.open("android-input.js").bufferedReader().use { it.readText() }
         createNotificationChannel()
 
         // Pre-warm WebView engine during extraction
@@ -365,7 +367,7 @@ class GameActivity : AppCompatActivity() {
                 if (request.url.path == "/application.js") {
                     return injectPerformanceIntoApplication(response)
                 }
-                // Inject touch-blocking script into index.html before browser parses it
+                // Install input and engine bridges before the page starts.
                 if (request.url.toString() == "https://appassets.androidplatform.net/index.html") {
                     return injectTouchBlockerIntoHtml(response)
                 }
@@ -428,35 +430,18 @@ class GameActivity : AppCompatActivity() {
         checkForAppUpdate()
     }
 
-    /**
-     * Injects touch-blocking JavaScript directly into index.html before the browser
-     * parses it. Uses a MutationObserver to attach capture-phase listeners the moment
-     * GameCanvas is created — zero polling delay, works for both WebGL and Canvas2D.
-     */
+    /** Install the canvas touch adapter before the engine attaches listeners. */
     private fun injectTouchBlockerIntoHtml(response: WebResourceResponse): WebResourceResponse {
         val html = response.data.bufferedReader().use { it.readText() }
-        val tag = """
-<script>
-(function(){
-var o=new MutationObserver(function(){
-var c=document.getElementById('GameCanvas');
-if(c){
-c.addEventListener('touchstart',function(e){e.preventDefault();e.stopImmediatePropagation()},{capture:true,passive:false});
-c.addEventListener('touchmove',function(e){e.preventDefault();e.stopImmediatePropagation()},{capture:true,passive:false});
-c.addEventListener('touchend',function(e){e.preventDefault();e.stopImmediatePropagation()},{capture:true,passive:false});
-o.disconnect()}});
-o.observe(document.body||document.documentElement,{childList:true,subtree:true})})();
-</script>
-</body>""".trimIndent()
         val head = Regex("<head(?:\\s[^>]*)?>", RegexOption.IGNORE_CASE).find(html)
         val bridgeTag = "<script>window.PvzTargetFps=" + performanceMode.targetFps + ";" +
-            performanceScript + gameBridgeHookJs + "</script>"
+            performanceScript + inputScript + gameBridgeHookJs + "</script>"
         val hookedHtml = if (head != null) {
             html.replaceRange(head.range, head.value + bridgeTag)
         } else {
             bridgeTag + html
         }
-        val modified = hookedHtml.replace("</body>", tag)
+        val modified = hookedHtml
         return WebResourceResponse(
             response.mimeType,
             response.encoding,
@@ -530,9 +515,7 @@ o.observe(document.body||document.documentElement,{childList:true,subtree:true})
         '<div style="font-size:16px;margin:10px;">&#9995; ' +
             '${getString(R.string.gesture_scroll)}</div>' +
         '<div style="font-size:16px;margin:10px;">&#128076; ' +
-            '${getString(R.string.gesture_rightclick)}</div>' +
-        '<div style="font-size:16px;margin:10px;">&#9201; ' +
-            '${getString(R.string.longpress_rightclick)}</div>';
+            '${getString(R.string.gesture_rightclick)}</div>';
     document.body.appendChild(overlay);
 
     function dismiss() {
@@ -810,7 +793,7 @@ o.observe(document.body||document.documentElement,{childList:true,subtree:true})
             try {
                 val release = withContext(Dispatchers.IO) {
                     val conn = java.net.URL(
-                        "https://api.github.com/repos/MrPurple666/pvzge-android/releases/latest"
+                        "https://api.github.com/repos/CreatorSXY/pvzge-android/releases/latest"
                     ).openConnection() as java.net.HttpURLConnection
                     try {
                         conn.setRequestProperty("Accept", "application/vnd.github+json")
@@ -837,7 +820,7 @@ o.observe(document.body||document.documentElement,{childList:true,subtree:true})
                         .singleOrNull { it.optString("name").endsWith(".apk", true) }
                     ?: return@launch
                 val url = apk.getString("browser_download_url")
-                require(url.startsWith("https://github.com/MrPurple666/pvzge-android/releases/download/"))
+                require(url.startsWith("https://github.com/CreatorSXY/pvzge-android/releases/download/"))
                 val size = apk.getLong("size")
                 require(size > 0)
                 lifecycle.withResumed {

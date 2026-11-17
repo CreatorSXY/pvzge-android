@@ -18,7 +18,7 @@ enum class PerformanceMode(val targetFps: Int, val maxRenderEdge: Int, val label
             return if (manager.isLowRamDevice || memory.totalMem <= 4L * 1024 * 1024 * 1024) {
                 LOW_END
             } else {
-                BALANCED
+                ORIGINAL
             }
         }
     }

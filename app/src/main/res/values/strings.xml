@@ -10,7 +10,7 @@
     <string name="extraction_error">Failed to extract game files. Check storage space and try again.</string>
     <string name="retry">Retry</string>
     <string name="close_app">Close</string>
-    <string name="gesture_click">Tap = Click</string>
+    <string name="gesture_click">Tap to select; tap once to plant, or drag to plant</string>
     <string name="gesture_scroll">Two-finger swipe = Scroll</string>
     <string name="gesture_rightclick">Two-finger tap = Right-click</string>
     <string name="longpress_rightclick">Long-press = Right-click</string>
@@ -40,6 +40,6 @@
     <string name="performance_title">Performance</string>
     <string name="performance_low">Low-end · 30 FPS target · lower resolution</string>
     <string name="performance_balanced">Balanced · 60 FPS target · reduced resolution</string>
-    <string name="performance_original">Original · 60 FPS target · full resolution</string>
+    <string name="performance_original">Full resolution · 60 FPS target · sharper on tablets</string>
     <string name="performance_apply">Apply</string>
 </resources>
