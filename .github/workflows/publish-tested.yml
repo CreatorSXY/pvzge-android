@@ -1,4 +1,4 @@
-name: Publish an already tested APK
+name: Prepare or publish a tested APK
 on:
   workflow_dispatch:
     inputs:
@@ -6,6 +6,10 @@ on:
         description: 'Successful Build and Release run to publish (explicit approval required)'
         type: string
         required: true
+      publish:
+        description: 'Make the draft public (requires explicit approval for this version)'
+        type: boolean
+        default: false
 permissions:
   contents: write
   actions: read
@@ -32,7 +36,7 @@ jobs:
       - name: Verify package identity and prepare release
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, re, subprocess
+          import hashlib, json, os, re, shutil, subprocess
           from pathlib import Path
           run = json.load(open('run.json'))
           root = Path('package')
@@ -49,7 +53,7 @@ jobs:
           assert "versionName='" + version + "'" in info, 'APK version mismatch'
           assert "versionCode='" + str(20000 + run['run_number']) + "'" in info, 'APK code mismatch'
           digest = hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest()
-          Path('app-release.apk').write_bytes(apk.read_bytes())
+          shutil.copyfile(apk, 'app-release.apk')
           Path('app-release.apk.sha256').write_text(digest + '  app-release.apk\n')
           Path('build-source.json').write_text(json.dumps(source, indent=2))
           Path('release-notes.md').write_text(
@@ -62,10 +66,15 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as out:
               out.write('RELEASE_VERSION=' + version + '\nSOURCE_SHA=' + run['head_sha'] + '\n')
           PY
-      - name: Publish approved APK
+      - name: Prepare review draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --target "$SOURCE_SHA" --title "Gardendless Android $RELEASE_VERSION" \
+            --draft --target "$SOURCE_SHA" --title "Gardendless Android $RELEASE_VERSION" \
             --notes-file release-notes.md app-release.apk app-release.apk.sha256 build-source.json
+      - name: Publish approved draft
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
