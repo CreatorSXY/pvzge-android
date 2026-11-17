@@ -1,0 +1,28 @@
+name: Inspect official game input
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract input-related scripts from official image
+        run: |
+          python3 scripts/game-source.py > source.json
+          image=$(python3 -c 'import json;print(json.load(open("source.json"))["image"])')
+          docker pull --platform linux/amd64 "$image"
+          container=$(docker create --platform linux/amd64 "$image")
+          trap 'docker rm "$container"' EXIT
+          mkdir inspection
+          for name in assets/main/index.js application.js index.html src/settings.json; do
+            docker cp "$container:/usr/share/nginx/html/$name" "inspection/$(basename "$name")" || exit 1
+          done
+          docker cp "$container:/usr/share/nginx/html/tauri-shim.js" inspection/tauri-shim.js || true
+          cp source.json inspection/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-input-scripts
+          path: inspection
