@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish a public APK release (requires explicit approval)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -98,8 +103,18 @@ jobs:
       - name: Compile, lint and package APK
         if: steps.source.outputs.build == 'true'
         run: ./gradlew :app:assembleRelease :app:lintRelease --no-daemon
-      - name: Publish APK with source provenance
+      - name: Save review build
         if: steps.source.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gardendless-android-review
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            build-source.json
+            game-version.txt
+          retention-days: 14
+      - name: Publish APK with source provenance
+        if: steps.source.outputs.build == 'true' && github.event_name == 'workflow_dispatch' && inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.version.outputs.name }}
