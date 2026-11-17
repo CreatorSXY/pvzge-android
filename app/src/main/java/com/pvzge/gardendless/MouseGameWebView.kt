@@ -6,7 +6,7 @@ import android.content.Context
 import android.util.AttributeSet
 import android.webkit.WebView
 
-/** Touch-to-mouse conversion lives in android-input.js, in CSS coordinates.
+/** Touch routing lives in android-input.js; direct planting lives in android-direct-touch.js.
  * Never forward a touch AND inject a mouse event for the same physical input.
  * HTML controls, physical mice and accessibility keep WebView's normal dispatch.
  */

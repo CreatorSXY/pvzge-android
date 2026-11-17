@@ -72,6 +72,19 @@ jobs:
           docker cp "$container:/usr/share/nginx/html/." ../pvzge_web/docs/
           python3 scripts/game-source.py --validate ../pvzge_web/docs > game-version.txt
           node scripts/check-touch-contract.cjs ../pvzge_web/docs/assets/main/index.js
+      - name: Verify tap and drag in the official game
+        if: steps.source.outputs.build == 'true'
+        env:
+          PVZ_PLAYWRIGHT_PATH: /tmp/pvzge-browser/node_modules/playwright
+        run: |
+          npm install --prefix /tmp/pvzge-browser playwright@1.65.1
+          node tests/browser-game.cjs
+      - name: Save real game touch evidence
+        if: always() && steps.source.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-touch-browser-results
+          path: work/browser-results
       - uses: actions/setup-java@v4
         if: steps.source.outputs.build == 'true'
         with:
@@ -133,7 +146,7 @@ jobs:
               'Game version: ' + game + '\n\n'
               'Official web game extracted from `'+source['image']+'`.\n\n'
               'Android changes: direct game-level card selection and planting; drag preview with placement on release; full-resolution rendering.\n\n'
-              'Automated checks pass; Samsung Tab S10+ touch and visual verification is still required.\n\n'
+              'Official-game browser checks passed: tap-to-select, first-tap planting, drag preview, release-to-plant, original sun cost, and zero synthetic mouse presses for planting. Samsung Tab S10+ verification is still required.\n\n'
               'Export your save before updating.\n')
           PY
           gh release create "v$RELEASE_VERSION" --title "Gardendless Android $RELEASE_VERSION" \
