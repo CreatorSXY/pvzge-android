@@ -102,7 +102,11 @@ jobs:
           PY
       - name: Compile, lint and package APK
         if: steps.source.outputs.build == 'true'
-        run: ./gradlew :app:assembleRelease :app:lintRelease --no-daemon
+        run: |
+          ./gradlew :app:assembleRelease :app:lintRelease --no-daemon || {
+            cat app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt 2>/dev/null || true
+            exit 1
+          }
       - name: Save review build
         if: steps.source.outputs.build == 'true'
         uses: actions/upload-artifact@v4
