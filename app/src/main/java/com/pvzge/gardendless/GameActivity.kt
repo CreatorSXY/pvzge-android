@@ -48,6 +48,7 @@ class GameActivity : AppCompatActivity() {
     @Volatile private var performanceMode: PerformanceMode = PerformanceMode.ORIGINAL
     private lateinit var performanceScript: String
     private lateinit var inputScript: String
+    private lateinit var directTouchScript: String
     private var performanceDialog: android.app.Dialog? = null
     private var webviewReady = false
     private lateinit var aspectContainer: AspectRatioFrameLayout
@@ -75,6 +76,7 @@ class GameActivity : AppCompatActivity() {
         performanceMode = PerformanceMode.load(this)
         performanceScript = assets.open("android-performance.js").bufferedReader().use { it.readText() }
         inputScript = assets.open("android-input.js").bufferedReader().use { it.readText() }
+        directTouchScript = assets.open("android-direct-touch.js").bufferedReader().use { it.readText() }
         createNotificationChannel()
 
         // Pre-warm WebView engine during extraction
@@ -367,6 +369,11 @@ class GameActivity : AppCompatActivity() {
                 if (request.url.path == "/application.js") {
                     return injectPerformanceIntoApplication(response)
                 }
+                if (request.url.path == "/assets/main/index.js") {
+                    val source = response.data.bufferedReader().use { it.readText() }
+                    val prefix = "window.PvzDirectTouch && window.PvzDirectTouch.captureModules(System);\n"
+                    return WebResourceResponse(response.mimeType, response.encoding, (prefix + source).byteInputStream())
+                }
                 // Install input and engine bridges before the page starts.
                 if (request.url.toString() == "https://appassets.androidplatform.net/index.html") {
                     return injectTouchBlockerIntoHtml(response)
@@ -435,7 +442,7 @@ class GameActivity : AppCompatActivity() {
         val html = response.data.bufferedReader().use { it.readText() }
         val head = Regex("<head(?:\\s[^>]*)?>", RegexOption.IGNORE_CASE).find(html)
         val bridgeTag = "<script>window.PvzTargetFps=" + performanceMode.targetFps + ";" +
-            performanceScript + inputScript + gameBridgeHookJs + "</script>"
+            performanceScript + directTouchScript + inputScript + gameBridgeHookJs + "</script>"
         val hookedHtml = if (head != null) {
             html.replaceRange(head.range, head.value + bridgeTag)
         } else {
@@ -454,7 +461,8 @@ class GameActivity : AppCompatActivity() {
         val assignment = marker.find(source)
         val modified = if (assignment != null) {
             source.replaceRange(assignment.range,
-                assignment.value + "window.PvzPerformance && window.PvzPerformance.install(engine);")
+                assignment.value + "window.PvzPerformance && window.PvzPerformance.install(engine);" +
+                    "window.PvzDirectTouch && window.PvzDirectTouch.installEngine(engine);")
         } else {
             android.util.Log.w("Gardendless", "Performance hook: unrecognized application bootstrap")
             source
@@ -485,7 +493,7 @@ class GameActivity : AppCompatActivity() {
 
     override fun onPause() {
         if (webviewReady) {
-            webView.evaluateJavascript("window.PvzPerformance && window.PvzPerformance.setPaused(true);", null)
+            webView.evaluateJavascript("window.PvzInput && window.PvzInput.cancel();window.PvzPerformance && window.PvzPerformance.setPaused(true);", null)
             webView.onPause()
         }
         super.onPause()

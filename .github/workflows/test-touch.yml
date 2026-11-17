@@ -1,0 +1,34 @@
+name: Test direct touch in official game
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract input-related scripts from official image
+        run: |
+          python3 scripts/game-source.py > source.json
+          image=$(python3 -c 'import json;print(json.load(open("source.json"))["image"])')
+          docker pull --platform linux/amd64 "$image"
+          container=$(docker create --platform linux/amd64 "$image")
+          trap 'docker rm "$container"' EXIT
+          mkdir -p ../pvzge_web/docs
+          docker cp "$container:/usr/share/nginx/html/." ../pvzge_web/docs/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test real touch with official game
+        env:
+          PVZ_PLAYWRIGHT_PATH: /tmp/pvzge-browser/node_modules/playwright
+        run: |
+          npm install --prefix /tmp/pvzge-browser playwright@1.65.1
+          node tests/browser-game.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: direct-touch-browser-results
+          path: work/browser-results
