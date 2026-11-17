@@ -1,0 +1,71 @@
+name: Publish an already tested APK
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful Build and Release run to publish (explicit approval required)'
+        type: string
+        required: true
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate selected build and retrieve its APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.run_id }}
+        run: |
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > run.json
+          python3 - <<'PY'
+          import json
+          run = json.load(open('run.json'))
+          assert run['conclusion'] == 'success', 'Build has not passed'
+          assert run['path'] == '.github/workflows/release.yml', 'Unexpected workflow'
+          assert run['head_branch'] == 'master', 'Unexpected source branch'
+          PY
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" -n gardendless-android-review -D package
+      - name: Verify package identity and prepare release
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          run = json.load(open('run.json'))
+          root = Path('package')
+          apk = root / 'app/build/outputs/apk/release/app-release.apk'
+          source = json.loads((root / 'build-source.json').read_text())
+          assert source['wrapper_sha'] == run['head_sha'], 'Source provenance mismatch'
+          game = (root / 'game-version.txt').read_text().strip()
+          version = game + '.' + str(20000 + run['run_number'])
+          sdk = Path(os.environ.get('ANDROID_HOME', '/usr/local/lib/android/sdk'))
+          tools = list(sdk.glob('build-tools/*/aapt'))
+          assert tools, 'Android package inspection tool is unavailable'
+          info = subprocess.check_output([str(sorted(tools)[-1]), 'dump', 'badging', str(apk)], text=True)
+          assert "name='com.pvzge.gardendless'" in info
+          assert "versionName='" + version + "'" in info, 'APK version mismatch'
+          assert "versionCode='" + str(20000 + run['run_number']) + "'" in info, 'APK code mismatch'
+          digest = hashlib.file_digest(apk.open('rb'), 'sha256').hexdigest()
+          Path('app-release.apk').write_bytes(apk.read_bytes())
+          Path('app-release.apk.sha256').write_text(digest + '  app-release.apk\n')
+          Path('build-source.json').write_text(json.dumps(source, indent=2))
+          Path('release-notes.md').write_text(
+              'Game version: ' + game + '\n\n'
+              'Direct touch planting: tap a card then tap a lawn cell, or drag a card and release to plant.\n\n'
+              'Verified in the official game with browser touch input: first-tap planting, drag preview, release-to-plant, original sun cost, and zero synthetic mouse presses for planting. Android compilation and lint passed. Samsung Tab S10+ verification remains pending.\n\n'
+              'Full-resolution rendering is retained. Other controls retain the existing adapter.\n\n'
+              'Built and tested in ' + run['html_url'] + '. This release publishes that exact APK without rebuilding.\n\n'
+              'Export your save before updating.\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write('RELEASE_VERSION=' + version + '\nSOURCE_SHA=' + run['head_sha'] + '\n')
+          PY
+      - name: Publish approved APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" --title "Gardendless Android $RELEASE_VERSION" \
+            --notes-file release-notes.md app-release.apk app-release.apk.sha256 build-source.json
