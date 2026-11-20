@@ -3,13 +3,19 @@ set -euo pipefail
 mkdir -p work/save-upgrade
 sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
 export PATH="$sdk_root/platform-tools:$sdk_root/emulator:$PATH"
+export ANDROID_USER_HOME="${RUNNER_TEMP:-/tmp}/pvzge-android-user"
+export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+mkdir -p "$ANDROID_AVD_HOME"
 "$sdk_root/cmdline-tools/latest/bin/sdkmanager" 'system-images;android-35;google_apis;x86_64' >/dev/null
-printf 'no\n' | "$sdk_root/cmdline-tools/latest/bin/avdmanager" create avd --force --name pvzge-save --package 'system-images;android-35;google_apis;x86_64' --device pixel_6 >/dev/null
+printf 'no\n' | "$sdk_root/cmdline-tools/latest/bin/avdmanager" create avd --force --name pvzge-save --path "$ANDROID_AVD_HOME/pvzge-save.avd" --package 'system-images;android-35;google_apis;x86_64' --device pixel_6
+"$sdk_root/emulator/emulator" -list-avds | tee work/save-upgrade/avds.txt
+rg '^pvzge-save$' work/save-upgrade/avds.txt
 sudo chown "$(id -u):$(id -g)" /dev/kvm
 "$sdk_root/emulator/emulator" -avd pvzge-save -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 3072 -partition-size 4096 >work/save-upgrade/emulator.log 2>&1 &
 emulator_pid=$!
-trap 'adb logcat -d > work/save-upgrade/logcat.txt 2>/dev/null || true; adb emu kill 2>/dev/null || true; kill "$emulator_pid" 2>/dev/null || true' EXIT
-adb wait-for-device
+trap 'timeout 10 adb logcat -d > work/save-upgrade/logcat.txt 2>/dev/null || true; timeout 10 adb emu kill 2>/dev/null || true; kill "$emulator_pid" 2>/dev/null || true; tail -60 work/save-upgrade/emulator.log' EXIT
+timeout 240 adb wait-for-device
 for i in $(seq 1 120); do
   if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
   sleep 2
