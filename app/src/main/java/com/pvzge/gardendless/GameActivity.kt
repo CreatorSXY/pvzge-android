@@ -384,8 +384,7 @@ class GameActivity : AppCompatActivity() {
     }
 
     private fun setupWebview() {
-        // WebView was pre-warmed in onCreate
-        // Apply GPU and security settings
+        // Attach the WebView only after any required save snapshot/export has completed.
 
         (webView.parent as? android.view.ViewGroup)?.removeView(webView)
         webView.visibility = View.VISIBLE

@@ -8,6 +8,8 @@ This protection starts **after** the signed update is installed. It cannot provi
 
 The all-player JSON is the complete stored player list. The original game's player import accepts one player object at a time. Open `tools/save-backup.html` in a browser without uploading your save anywhere, select the all-player backup, and download each player's individual JSON for the original player import. The page works offline and preserves unknown player properties. The repaired in-game export button already produces the original single-player format.
 
+APK 0.16.24.20012 passed an API 35 emulator test installing the actual 20004 release, seeding real WebView storage, performing a same-signature update, and verifying the snapshot and externally exported JSON before any game scripts ran. This validates a seeded upgrade scenario, not the contents or backup state of a user's physical device.
+
 - Tap a card to select it, then tap a lawn cell once to plant. Or drag a card to a cell and release to plant.
 - Card selection calls the original `UIInGame.tryChangingIndex`. The current finger position is converted through Cocos, the lawn cell/preview updates immediately, and release calls the original `LnC.PlaceUIPlant` once. Planting emits no synthetic DOM mouse presses. Original sun, cooldown, terrain and occupancy rules remain in effect.
 - Other menus/tools still use the existing mouse adapter; this is a WebView app with game-level planting adaptation, not an Android-native game engine rebuild.
@@ -21,6 +23,8 @@ The all-player JSON is the complete stored player list. The original game's play
 The old `Gzh0821/pvzge_web` endpoint currently returns 404. This fork follows the official `gaozih/pvzge:latest` Docker image linked by the official website instead. The daily workflow resolves an immutable Linux/amd64 image digest, compares it and the wrapper commit to the last release, extracts the web files without running the container, validates the game layout/engine bootstrap, runs checks, and builds an APK for review. Public releases require manually selecting the Publish option; scheduled runs do not publish. Same-version game changes are detected by digest. Android releases use `GAME_VERSION.BUILD_NUMBER` so wrapper-only updates can also be offered in-app.
 
 This follows the **official Docker publication**, whose timing may differ from the live website. Unknown game layouts or failed checks stop publishing. The workflow must be enabled in this fork's Actions tab. The APK contains the game resources for offline play.
+
+In this save-protection release, existing installations deliberately retain their extracted game resources; rebuilding the APK with newer bundled resources does not automatically replace those installed files. Fresh installations use the bundle in the APK. Resource upgrades for existing installations need a separate backup-aware update path.
 
 ## Build locally
 
