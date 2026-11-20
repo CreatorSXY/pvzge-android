@@ -61,3 +61,8 @@ test('modern Promise.all controller stays untouched and capture is idempotent',a
 test('wave detection sees original factories when combined with the existing touch capture',async()=>{
   const {context,level}=environment(legacyFactory,true);await level.judgeWaveCount();assert.equal(context.PvzWaveFix.state().applied,true);assert.ok(Number.isFinite(level.WaveZombieDamageCountdown));
 });
+
+test('unknown controller factories remain unchanged and are not reported as fixed',()=>{
+  function unknownFactory(publish){return{execute(){function Other(){};Other.prototype.judgeWaveCount=function(){return 123};Other.prototype.nextWave=function(){};publish('levelController',Other)}}}
+  const {context,level}=environment(unknownFactory);assert.equal(context.PvzWaveFix.state().legacy,null);assert.equal(context.PvzWaveFix.state().applied,false);assert.equal(level.judgeWaveCount(),123);
+});

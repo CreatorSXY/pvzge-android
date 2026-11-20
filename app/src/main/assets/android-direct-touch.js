@@ -286,6 +286,9 @@
                 });
             };
             system.__pvzDirectTouchCapture = true;
+            // Older retained/cached bundles may only contain the original touch
+            // bootstrap prefix. Install wave capture outside this wrapper as well.
+            if (window.PvzWaveFix) window.PvzWaveFix.captureModules(system);
         },
         begin: function (p, id) {
             var ui = refs.UIInGame && refs.UIInGame.component;

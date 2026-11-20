@@ -64,8 +64,8 @@
                     var end = source.indexOf('.nextWave=', start + 1);
                     var method = start >= 0 && end > start ? source.slice(start, end) : '';
                     // Unknown or already-fixed factories are left intact.
-                    legacy = !!method && method.includes('new Promise') && method.includes('.forEach(') &&
-                        !method.includes('Promise.all');
+                    legacy = method.includes('Promise.all') ? false :
+                        method.includes('new Promise') && method.includes('.forEach(') ? true : null;
                 }
                 return register.call(this, name, dependencies, function (publish, context) {
                     return declare.call(this, function (key, value) {
