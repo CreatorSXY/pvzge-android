@@ -45,6 +45,10 @@ python3 scripts/game-source.py --validate ../pvzge_web/docs
 ./gradlew assembleDebug
 ```
 
+## Retained-resource wave compatibility
+
+Save protection intentionally keeps the installed game files, so the app version and actual game version can differ. The Back menu now reports both. Some older game builds count asynchronous wave actions manually: an empty RTID lookup (including pirate1's disabled `//Wave1Event`) leaves its Promise unresolved and keeps the wave damage timer at Infinity after the first zombie. The adapter detects that specific legacy controller factory and uses the upstream Promise.all behavior, including empty-array completion. Existing spawn actions, health thresholds, flag delays and shared game rules are preserved. Modern controllers already using Promise.all are left untouched. No save or installed resource file is rewritten by this fix.
+
 ## Input design
 
 This fork reuses Cocos Creator's built-in multi-touch routing for engine UI. Forwarded contacts receive distinct IDs, while duplicate mouse-to-touch simulation is suppressed only during adapter dispatch. Existing mouse-only game callbacks still run in each contact's saved context. No additional gesture-recognition dependency is needed: recognizing pinch/swipe does not separate the game's shared card selection, placement cursor, sun and cooldown state. Planting and pickups continue to use the original game APIs and rules.

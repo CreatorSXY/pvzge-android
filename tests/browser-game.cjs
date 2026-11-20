@@ -10,6 +10,7 @@ const origin='http://127.0.0.1:'+port;
 fs.mkdirSync(output, {recursive:true});
 const direct = fs.readFileSync('app/src/main/assets/android-direct-touch.js','utf8');
 const input = fs.readFileSync('app/src/main/assets/android-input.js','utf8');
+const waveFix = fs.readFileSync('app/src/main/assets/android-wave-fix.js','utf8');
 const exporting = fs.readFileSync('app/src/main/assets/android-export.js','utf8');
 const types = {'.js':'application/javascript','.json':'application/json','.html':'text/html', '.css':'text/css',
   '.wasm':'application/wasm','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.avif':'image/avif',
@@ -24,7 +25,7 @@ const server=http.createServer((req,res)=>{
   }
   res.setHeader('Content-Type',types[path.extname(file)]||'application/octet-stream');
   if(rel==='/index.html' && process.env.PVZ_SERVE_CLIENT==='1') {
-    const hooks=direct+'\n'+input+`\nwindow.render_game_to_text=function(){
+    const hooks=waveFix+'\n'+direct+'\n'+input+`\nwindow.render_game_to_text=function(){
       return JSON.stringify({coordinates:'CSS pixels, origin top left',touch:PvzDirectTouch.state(),contacts:PvzInput.state(),
         scene:window.System&&System.get(System.resolve('cc'))?.director.getScene()?.name});};
       var boot=setInterval(function(){
@@ -41,9 +42,9 @@ const server=http.createServer((req,res)=>{
   if(rel==='/application.js') {
     const s=fs.readFileSync(file,'utf8');
     if(!/\bcc\s*=\s*engine\s*;/.test(s))throw Error('Unknown bootstrap');
-    res.end(s.replace(/\bcc\s*=\s*engine\s*;/,m=>m+'window.PvzDirectTouch.installEngine(engine);'));return;
+    res.end(s.replace(/\bcc\s*=\s*engine\s*;/,m=>m+'window.PvzDirectTouch.installEngine(engine);window.PvzWaveFix.installEngine(engine);'));return;
   }
-  if(rel==='/assets/main/index.js') {res.write('window.PvzDirectTouch.captureModules(System);\n');}
+  if(rel==='/assets/main/index.js') {res.write('window.PvzDirectTouch.captureModules(System);window.PvzWaveFix.captureModules(System);\n');}
   fs.createReadStream(file).pipe(res);
 });
 (async()=>{
@@ -58,7 +59,7 @@ const server=http.createServer((req,res)=>{
   page.on('console',m=>{if(m.type()==='error'||m.type()==='warning')logs.push({type:m.type(),text:m.text()});});
   await page.addInitScript(`window.__nativeExports=[];window.GardendlessBridge={
     exportData:(data,name)=>window.__nativeExports.push({data,name}),
-    exportError:()=>{throw Error('Native export failed');}};`+exporting+'\n'+direct+'\n'+input);
+    exportError:()=>{throw Error('Native export failed');}};`+exporting+'\n'+waveFix+'\n'+direct+'\n'+input);
   // Avoid unrelated third-party analytics/ad requests in the isolated test profile.
   await page.route('**/*',route=>route.request().url().startsWith(origin+'/') ? route.continue():route.abort());
   try {
@@ -75,10 +76,11 @@ const server=http.createServer((req,res)=>{
     if(visibleButtons.length!==1)throw Error('Expected the one visible official update close button');
     await visibleButtons[0].click();
     console.log('Closed official update notes');
-    const before=await page.evaluate(()=>({touch:PvzDirectTouch.state(),
+    const before=await page.evaluate(()=>({touch:PvzDirectTouch.state(),waveFix:PvzWaveFix.state(),
       scene:System.get(System.resolve('cc')).director.getScene()?.name,
       player:!!System.get('chunks:///_virtual/PlayerProperties.ts')?.AllPlayerProperties?.currentPlayer}));
     console.log('Loaded official game:',JSON.stringify(before));
+    if(before.waveFix.legacy!==false||before.waveFix.applied)throw Error('Modern official wave logic was unexpectedly replaced');
     await Promise.race([page.evaluate(async()=>{
       const K=System.get('chunks:///_virtual/KeyListener.ts').KeyListener;
       await K.goToLevel(['tutorial1'],[],false,false);

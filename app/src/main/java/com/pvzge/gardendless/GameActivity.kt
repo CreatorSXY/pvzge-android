@@ -49,6 +49,7 @@ class GameActivity : AppCompatActivity() {
     private lateinit var performanceScript: String
     private lateinit var inputScript: String
     private lateinit var directTouchScript: String
+    private lateinit var waveFixScript: String
     private lateinit var exportScript: String
     private var protectingSave = false
     private var saveProtectionStatus: TextView? = null
@@ -83,6 +84,7 @@ class GameActivity : AppCompatActivity() {
         performanceScript = assets.open("android-performance.js").bufferedReader().use { it.readText() }
         inputScript = assets.open("android-input.js").bufferedReader().use { it.readText() }
         directTouchScript = assets.open("android-direct-touch.js").bufferedReader().use { it.readText() }
+        waveFixScript = assets.open("android-wave-fix.js").bufferedReader().use { it.readText() }
         exportScript = assets.open("android-export.js").bufferedReader().use { it.readText() }
         createNotificationChannel()
 
@@ -503,7 +505,8 @@ class GameActivity : AppCompatActivity() {
                 }
                 if (request.url.path == "/assets/main/index.js") {
                     val source = response.data.bufferedReader().use { it.readText() }
-                    val prefix = "window.PvzDirectTouch && window.PvzDirectTouch.captureModules(System);\n"
+                    val prefix = "window.PvzDirectTouch && window.PvzDirectTouch.captureModules(System);\n" +
+                        "window.PvzWaveFix && window.PvzWaveFix.captureModules(System);\n"
                     return WebResourceResponse(response.mimeType, response.encoding, (prefix + source).byteInputStream())
                 }
                 // Install input and engine bridges before the page starts.
@@ -574,7 +577,7 @@ class GameActivity : AppCompatActivity() {
         val html = response.data.bufferedReader().use { it.readText() }
         val head = Regex("<head(?:\\s[^>]*)?>", RegexOption.IGNORE_CASE).find(html)
         val bridgeTag = "<script>window.PvzTargetFps=" + performanceMode.targetFps + ";" +
-            performanceScript + directTouchScript + inputScript + exportScript + gameBridgeHookJs + "</script>"
+            performanceScript + waveFixScript + directTouchScript + inputScript + exportScript + gameBridgeHookJs + "</script>"
         val hookedHtml = if (head != null) {
             html.replaceRange(head.range, head.value + bridgeTag)
         } else {
@@ -594,7 +597,8 @@ class GameActivity : AppCompatActivity() {
         val modified = if (assignment != null) {
             source.replaceRange(assignment.range,
                 assignment.value + "window.PvzPerformance && window.PvzPerformance.install(engine);" +
-                    "window.PvzDirectTouch && window.PvzDirectTouch.installEngine(engine);")
+                    "window.PvzDirectTouch && window.PvzDirectTouch.installEngine(engine);" +
+                    "window.PvzWaveFix && window.PvzWaveFix.installEngine(engine);")
         } else {
             android.util.Log.w("Gardendless", "Performance hook: unrecognized application bootstrap")
             source
@@ -888,15 +892,39 @@ class GameActivity : AppCompatActivity() {
     private fun showExitDialog() {
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.game_menu)
-            .setItems(arrayOf(getString(R.string.save_export_all), getString(R.string.performance_title), getString(R.string.yes))) { _, index ->
+            .setItems(arrayOf(getString(R.string.save_export_all), getString(R.string.performance_title), getString(R.string.game_resource_info), getString(R.string.yes))) { _, index ->
                 when (index) {
                     0 -> exportAllPlayers()
                     1 -> showPerformanceSettings()
-                    2 -> finish()
+                    2 -> showGameResourceInfo()
+                    3 -> finish()
                 }
             }
             .setNegativeButton(R.string.no, null)
             .show()
+    }
+
+    private fun showGameResourceInfo() {
+        val directory = File(filesDir, "pvzge_web")
+        val version = runCatching {
+            org.json.JSONObject(File(directory, "app-info.json").readText()).optString("Version")
+        }.getOrNull()?.takeIf { Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(it) }
+            ?: runCatching {
+                Regex("<title>[^<]*?([0-9]+\\.[0-9]+\\.[0-9]+)[^<]*</title>", RegexOption.IGNORE_CASE)
+                    .find(File(directory, "index.html").readText())?.groupValues?.get(1)
+            }.getOrNull() ?: getString(R.string.game_resource_unknown)
+        webView.evaluateJavascript("window.PvzWaveFix ? window.PvzWaveFix.state() : null") { raw ->
+            val state = runCatching { org.json.JSONObject(raw) }.getOrNull()
+            val status = when {
+                state?.optBoolean("applied") == true -> getString(R.string.wave_fix_enabled)
+                state != null && !state.isNull("legacy") && !state.optBoolean("legacy") -> getString(R.string.wave_fix_unneeded)
+                else -> getString(R.string.game_resource_unknown)
+            }
+            if (!isFinishing && !isDestroyed) MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.game_resource_info)
+                .setMessage(getString(R.string.game_resource_details, BuildConfig.VERSION_NAME, version, status))
+                .setPositiveButton(android.R.string.ok, null).show()
+        }
     }
 
     // Local notification when extraction completes

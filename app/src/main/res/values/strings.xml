@@ -52,4 +52,9 @@
     <string name="save_not_found">No readable player save was found. No new save has been created. Keep the app installed so the local snapshot can be checked.</string>
     <string name="game_menu">Game menu</string>
     <string name="save_choose_external">Choose a folder outside the game, such as Downloads or Documents. The game files folder is not an independent backup.</string>
+    <string name="game_resource_info">Game version and compatibility</string>
+    <string name="game_resource_unknown">Not available</string>
+    <string name="game_resource_details">Android app: %1$s\nInstalled game resources: %2$s\nWave compatibility: %3$s</string>
+    <string name="wave_fix_enabled">Legacy wave fix enabled</string>
+    <string name="wave_fix_unneeded">Original game already includes the fix</string>
 </resources>

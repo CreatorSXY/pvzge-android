@@ -15,13 +15,14 @@ public class WaveProbe extends Instrumentation {
     private Activity activity;
     private WebView web;
     private File folder;
-    private boolean baseline;
+    private boolean baseline,legacyResources;
     private static final String LEVEL="System.get('chunks:///_virtual/levelController.ts').LevelPlay.component";
-    @Override public void onCreate(Bundle args){super.onCreate(args);baseline=args!=null&&Boolean.parseBoolean(args.getString("baseline","false"));start();}
+    @Override public void onCreate(Bundle args){super.onCreate(args);baseline=args!=null&&Boolean.parseBoolean(args.getString("baseline","false"));legacyResources=args!=null&&Boolean.parseBoolean(args.getString("legacy_resources","false"));start();}
     @Override public void onStart(){
         Bundle result=new Bundle();int code=Activity.RESULT_OK;
         try{
             folder=new File(getTargetContext().getExternalFilesDir(null),"wave-evidence");folder.mkdirs();
+            if(legacyResources) installLegacyFixture();
             runOnMainSync(()->WebView.setWebContentsDebuggingEnabled(true));
             activity=startActivitySync(new Intent().setClassName(getTargetContext().getPackageName(),"com.pvzge.gardendless.GameActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             await(180000,()->{runOnMainSync(()->web=findWeb(activity.getWindow().getDecorView()));return web!=null;});
@@ -44,7 +45,7 @@ public class WaveProbe extends Instrumentation {
             await(60000,()->Boolean.TRUE.equals(js(""+LEVEL+".gameStarted")));
             long deadline=System.currentTimeMillis()+120000;int maxWave=0;
             while(System.currentTimeMillis()<deadline){
-                JSONObject state=(JSONObject)js("(()=>{const L="+LEVEL+",U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;return {wave:L.currentWave,progress:L.levelProgressPercentage,time:L.gamedTime,next:String(L.NextWaveCountdown),damage:String(L.WaveZombieDamageCountdown),threshold:String(L.NextWaveZombieHealthPercentage),health:L.WaveLeftHealth,zombies:System.get('chunks:///_virtual/CharacterManager.ts').ZombiePool.pool().length,started:L.gameStarted,gaming:L.gaming,paused:U.paused,tutorialStuck:L.Tutorial_Wave_Stuck,errors:__waveErrors,ua:navigator.userAgent,baseline:"+baseline+"}})()");
+                JSONObject state=(JSONObject)js("(()=>{const L="+LEVEL+",U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;return {wave:L.currentWave,progress:L.levelProgressPercentage,time:L.gamedTime,next:String(L.NextWaveCountdown),damage:String(L.WaveZombieDamageCountdown),threshold:String(L.NextWaveZombieHealthPercentage),health:L.WaveLeftHealth,zombies:System.get('chunks:///_virtual/CharacterManager.ts').ZombiePool.pool().length,started:L.gameStarted,gaming:L.gaming,paused:U.paused,tutorialStuck:L.Tutorial_Wave_Stuck,errors:__waveErrors,fix:window.PvzWaveFix?.state(),ua:navigator.userAgent,baseline:"+baseline+"}})()");
                 append(state.toString());maxWave=Math.max(maxWave,state.getInt("wave"));
                 if(maxWave>=3)break;
                 Thread.sleep(2500);
@@ -54,6 +55,20 @@ public class WaveProbe extends Instrumentation {
             result.putString("result","PASS:wave:"+(baseline?"baseline":"adapter"));
         }catch(Throwable e){capture("failure");StringWriter out=new StringWriter();e.printStackTrace(new PrintWriter(out));result.putString("result","FAIL:wave:"+out);code=Activity.RESULT_CANCELED;}
         finish(code,result);
+    }
+    private void installLegacyFixture() throws Exception {
+        File root=new File(getTargetContext().getFilesDir(),"pvzge_web");root.mkdirs();
+        File source=new File(getTargetContext().getExternalFilesDir(null),"legacy.zip");
+        try(java.util.zip.ZipInputStream in=new java.util.zip.ZipInputStream(new FileInputStream(source))){
+            java.util.zip.ZipEntry entry;byte[] buffer=new byte[65536];
+            while((entry=in.getNextEntry())!=null){File file=new File(root,entry.getName());
+                if(!file.getCanonicalPath().startsWith(root.getCanonicalPath()+File.separator))throw new IOException("Bad fixture path");
+                if(entry.isDirectory())file.mkdirs();else{file.getParentFile().mkdirs();try(FileOutputStream out=new FileOutputStream(file)){int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);}}
+            }
+        }
+        source.delete();
+        int version=getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionCode;
+        getTargetContext().getSharedPreferences("app_data",Context.MODE_PRIVATE).edit().putInt("extracted_version",166).putInt("save_protection_version",version).commit();
     }
     private Object js(String expression)throws Exception{
         CountDownLatch done=new CountDownLatch(1);String[] value=new String[1];

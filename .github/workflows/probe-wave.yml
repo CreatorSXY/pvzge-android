@@ -8,6 +8,9 @@ on:
       baseline:
         type: boolean
         default: false
+      legacy_resources:
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -26,6 +29,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           APK_RUN: ${{ inputs.apk_run }}
           PROBE_BASELINE: ${{ inputs.baseline }}
+          PROBE_LEGACY_RESOURCES: ${{ inputs.legacy_resources }}
         run: bash scripts/probe-android-wave.sh
       - uses: actions/upload-artifact@v4
         if: always()

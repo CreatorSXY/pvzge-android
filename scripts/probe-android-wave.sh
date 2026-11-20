@@ -37,5 +37,12 @@ adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
 adb install "$base/app-release.apk"
 adb install "$base/probe.apk"
-adb shell am instrument -w -e baseline "$PROBE_BASELINE" com.pvzge.waveprobe/com.pvzge.waveprobe.WaveProbe | tee work/wave-results/result.txt
+if [ "$PROBE_LEGACY_RESOURCES" = true ]; then
+  curl --fail --location --retry 3 'https://github.com/MrPurple666/pvzge-android/releases/download/v0.16.6/app-release.apk' -o "$base/legacy.apk"
+  unzip -p "$base/legacy.apk" assets/pvzge_web.zip >"$base/legacy.zip"
+  rm "$base/legacy.apk"
+  adb shell mkdir -p /sdcard/Android/data/com.pvzge.gardendless/files
+  adb push "$base/legacy.zip" /sdcard/Android/data/com.pvzge.gardendless/files/legacy.zip
+fi
+adb shell am instrument -w -e baseline "$PROBE_BASELINE" -e legacy_resources "$PROBE_LEGACY_RESOURCES" com.pvzge.waveprobe/com.pvzge.waveprobe.WaveProbe | tee work/wave-results/result.txt
 grep -F 'PASS:wave:' work/wave-results/result.txt

@@ -52,4 +52,9 @@
     <string name="save_not_found">未读到可导出的玩家存档，没有创建新存档。请保留应用，以便检查本机保护快照。</string>
     <string name="game_menu">游戏菜单</string>
     <string name="save_choose_external">请选择“下载”或“文档”等游戏外的位置。“游戏文件”目录不能作为独立备份。</string>
+    <string name="game_resource_info">游戏版本与兼容性</string>
+    <string name="game_resource_unknown">暂未读取到</string>
+    <string name="game_resource_details">Android 应用：%1$s\n实际游戏资源：%2$s\n刷怪兼容修复：%3$s</string>
+    <string name="wave_fix_enabled">旧版刷怪修复已启用</string>
+    <string name="wave_fix_unneeded">原游戏已包含此修复</string>
 </resources>
