@@ -1,0 +1,33 @@
+name: Diagnose pirate wave progress in Android WebView
+on:
+  workflow_dispatch:
+    inputs:
+      apk_tag:
+        type: string
+        default: v0.16.24.20020
+      baseline:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Probe the existing APK without rebuilding or publishing it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_TAG: ${{ inputs.apk_tag }}
+          PROBE_BASELINE: ${{ inputs.baseline }}
+        run: bash scripts/probe-android-wave.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-wave-results
+          path: work/wave-results

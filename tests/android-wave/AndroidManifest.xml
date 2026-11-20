@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.pvzge.waveprobe">
+  <uses-sdk android:minSdkVersion="27" android:targetSdkVersion="35"/>
+  <application android:label="Wave probe" android:debuggable="true"/>
+  <instrumentation android:name="com.pvzge.waveprobe.WaveProbe" android:targetPackage="com.pvzge.gardendless"/>
+</manifest>
