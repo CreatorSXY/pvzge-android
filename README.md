@@ -13,7 +13,9 @@ APK 0.16.24.20012 passed an API 35 emulator test installing the actual 20004 rel
 - Tap a card to select it, then tap a lawn cell once to plant. Or drag a card to a cell and release to plant.
 - Card selection calls the original `UIInGame.tryChangingIndex`. The current finger position is converted through Cocos, the lawn cell/preview updates immediately, and release calls the original `LnC.PlaceUIPlant` once. Planting emits no synthetic DOM mouse presses. Original sun, cooldown, terrain and occupancy rules remain in effect.
 - Other menus/tools still use the existing mouse adapter; this is a WebView app with game-level planting adaptation, not an Android-native game engine rebuild.
-- Two-finger tap is right-click; two-finger swipe scrolls.
+- Multiple fingers have independent contact IDs, positions, card selections and release/cancel lifetimes. Two-finger input no longer becomes right-click or wheel scrolling. Ending one contact leaves the other contacts active. The game's existing planting preview follows the most recently active planting finger; other held cards retain their own action state.
+- Original shared sun, slot cooldown and terrain rules still apply. Releases in the same browser event recheck current sun and the original slot cooldown, and a cell with an asynchronous placement in progress cannot be committed again. Independent actions do not duplicate resources.
+- Pickup hit tests use each finger's own point/path, rather than drawing a fictitious mouse sweep between two fingers. Non-planting mouse-adapted controls run with their own saved selection/press state.
 - Holding one finger no longer becomes right-click, so holding/dragging a plant does not unexpectedly activate the shovel.
 - Back → Performance → Full resolution restores the full WebView viewport. Existing saved profile choices are retained. This removes wrapper downscaling, but cannot add detail missing from the original art or an engine-limited canvas.
 - In-app updates point to this fork, not the original Android wrapper.

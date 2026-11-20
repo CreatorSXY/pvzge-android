@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const direct = readFileSync('app/src/main/assets/android-direct-touch.js', 'utf8');
 const input = readFileSync('app/src/main/assets/android-input.js', 'utf8');
-function setup() {
-  const events = [], listeners = {}, placed = [], calls = [];
+function setup(options={}) {
+  const events = [], listeners = {}, placed = [], calls = [], spends=[];
   const rect = { left: 40, top: 20, width: 800, height: 500 };
   const canvas = { getBoundingClientRect: () => rect, dispatchEvent: e => events.push(e) };
   class Vec2 { constructor(x = 0, y = 0) { this.x = x; this.y = y; } }
@@ -19,16 +19,25 @@ function setup() {
   };
   function node(transform = {x:0,y:420}) {return {activeInHierarchy:true,getComponent:()=>transform};}
   const ca = { getSelectable: () => true };
-  const card = { node: node(), ca };
-  const ui = { node: node(), gameStarted:true, index:-1, currentCF:null, cards:{CFs:[card]},
+  const card = { node: node(), ca, SUNCOST:100 };
+  const cards=[card,...[50,75].map((cost,i)=>({node:node({x:(i+1)*65,y:420}),ca:{getSelectable:()=>true},SUNCOST:cost}))];
+  const ui = { node: node(), gameStarted:true, index:-1, currentCF:null,
+    cards:{CFs:cards,cardsUIUpper:cards.map(()=>({CD:0}))},
     mouse:{},plantInHandLayer:{},paused:false,indexLocked:false,
-    tryChangingIndex(i) { calls.push(['select',i]);if(ca.getSelectable()){this.index=i;this.currentCF=card;} }
+    tryChangingIndex(i) { calls.push(['select',i]);
+      if(i===-1 || i===this.index){this.index=-1;this.currentCF=null;return;}
+      if(cards[i]?.ca.getSelectable()){this.index=i;this.currentCF=cards[i];this.willCostSun=cards[i].SUNCOST;}
+    }
   };
-  let sun = 150;
+  let sun = options.sun ?? 150;
   const cells = Array.from({length:5},(_,r)=>Array.from({length:9},(_,c)=>({
     lIndex:r,cIndex:c,isInLawn:()=>true,onMouseLeave(){calls.push(['leave',r,c]);},
     onMouseEnter(){calls.push(['preview',r,c]);},
-    PlaceUIPlant(){if(this.occupied||sun<100)return;placed.push([r,c]);this.occupied=true;sun-=100;ui.index=-1;ui.currentCF=null;}
+    PlaceUIPlant(){const cost=ui.willCostSun;if(this.occupied||sun<cost)return;
+      placed.push([r,c]);spends.push([ui.index,r,c,cost]);
+      if(options.pending)this.spawningPromiseCount=(this.spawningPromiseCount||0)+1;else this.occupied=true;
+      if(options.cooldown)ui.cards.cardsUIUpper[ui.index].CD=10;
+      sun-=cost;ui.index=-1;ui.currentCF=null;}
   })));
   // Same boundary convention as the official Square methods: upper/left edge is outside.
   const Square = {component:{},judgeLIndex:y=>Math.ceil((400-y)/60)-1,
@@ -44,18 +53,21 @@ function setup() {
   const api=context.PvzDirectTouch;
   const system={register(name,deps,declare){declare((k,v)=>v,{}).execute();return name;}};
   api.captureModules(system);
-  for(const [name,value] of Object.entries({UIInGame:{component:ui},Mouse,Square,LevelPlay})) {
-    const module={UIInGame:'UI',Mouse:'Mouse',Square:'Square',LevelPlay:'levelController'}[name];
+  for(const [name,value] of Object.entries({UIInGame:{component:ui},Mouse,Square,LevelPlay,SunCount:{get Value(){return sun;}}})) {
+    const module={UIInGame:'UI',Mouse:'Mouse',Square:'Square',LevelPlay:'levelController',SunCount:'SunCount'}[name];
     system.register('chunks:///_virtual/'+module+'.ts',[],publish=>({execute(){publish(name,value);}}));
   }
   api.installEngine(cc);vm.runInNewContext(input,context);
+  let last=[];
   function touch(type,points,changed=[]) {
-    const toTouch=([x,y])=>({clientX:x,clientY:y});
+    const toTouch=([x,y,id=0])=>({clientX:x,clientY:y,identifier:id});
+    if (!changed.length && /touch(start|move)/.test(type)) changed=points;
+    if (type==='touchcancel' && !changed.length) changed=last;
     listeners[type]({type,target:canvas,touches:points.map(toTouch),changedTouches:changed.map(toTouch),
-      preventDefault(){},stopImmediatePropagation(){}});
+      preventDefault(){},stopImmediatePropagation(){}});last=points;
   }
   function tap(p){touch('touchstart',[p]);touch('touchend',[],[p]);}
-  return {api,touch,tap,events,placed,calls,ui,card,cells,ca,LevelPlay,Mouse,get sun(){return sun;}};
+  return {api,touch,tap,events,placed,calls,spends,ui,card,cards,cells,ca,LevelPlay,Mouse,get sun(){return sun;}};
 }
 test('tap card then first tap on a new cell plants once without any DOM mouse events',()=>{
   const s=setup();s.tap([60,60]);assert.equal(s.ui.index,0);assert.equal(s.placed.length,0);
@@ -79,14 +91,12 @@ test('occupied, unaffordable, cooled-down or out-of-lawn targets cannot spawn',(
     assert.equal(s.placed.length,0,mode);assert.equal(s.sun,150,mode);
   }
 });
-test('cancel, second finger, pause, scene exit and selection change never commit',()=>{
-  for(const mode of ['cancel','second','pause','scene','selection','blur']) {
+test('cancel, pause and scene exit never commit',()=>{
+  for(const mode of ['cancel','pause','scene','blur']) {
     const s=setup();s.touch('touchstart',[[60,60]]);s.touch('touchmove',[[210,210]]);
     if(mode==='cancel')s.touch('touchcancel',[]);
-    if(mode==='second')s.touch('touchstart',[[210,210],[220,220]]);
     if(mode==='pause')s.ui.paused=true;
     if(mode==='scene')s.LevelPlay.component.node.activeInHierarchy=false;
-    if(mode==='selection')s.ui.index=1;
     if(mode==='blur')s.api.cancel({}); // Explicit native pause cancellation uses PvzInput.cancel.
     if(mode==='blur')s.touch('touchcancel',[]);
     s.touch('touchend',[],[[210,210]]);assert.equal(s.placed.length,0,mode);
@@ -96,4 +106,49 @@ test('a commit token cannot spend sun or place twice',()=>{
   const s=setup();s.tap([60,60]);const t=s.api.begin({x:210,y:210});
   s.api.end(t,{x:210,y:210},false);s.api.end(t,{x:270,y:210},false);
   assert.equal(s.placed.length,1);assert.equal(s.sun,50);
+});
+test('three held cards retain their own selection and release coordinates out of order',()=>{
+  const s=setup({sun:500});
+  const a=[60,60,11],b=[125,60,22],c=[190,60,33];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[b,a],[b]);s.touch('touchstart',[c,a,b],[c]);
+  s.touch('touchmove',[[330,330,33],[210,210,11],[270,270,22]],[[210,210,11],[270,270,22],[330,330,33]]);
+  assert.equal(s.placed.length,0);assert.equal(s.api.state().fingers,3);
+  s.touch('touchend',[[210,210,11],[330,330,33]],[[270,270,22]]);
+  s.touch('touchend',[[210,210,11]],[[330,330,33]]);
+  s.touch('touchend',[],[[210,210,11]]);
+  assert.deepEqual(s.spends,[[1,2,2,50],[2,3,3,75],[0,1,1,100]]);
+  assert.equal(s.sun,275);assert.equal(s.events.length,0);assert.equal(s.api.state().fingers,0);
+});
+test('same-frame releases honor shared sun even when affordability flags are stale',()=>{
+  const s=setup({sun:100}),a=[60,60,11],b=[125,60,22];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
+  s.touch('touchend',[],[[210,210,11],[270,270,22]]);
+  assert.deepEqual(s.spends,[[0,1,1,100]]);assert.equal(s.sun,0);
+});
+test('same card cannot be spent twice before the next cooldown update',()=>{
+  const s=setup({sun:500,cooldown:true}),a=[60,60,11],b=[60,60,22];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
+  s.touch('touchend',[],[[210,210,11],[270,270,22]]);
+  assert.equal(s.spends.length,1);assert.equal(s.sun,400);
+});
+test('asynchronous pending placement reserves a cell against another same-frame finger',()=>{
+  const s=setup({sun:500,pending:true}),a=[60,60,11],b=[125,60,22];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
+  s.touch('touchend',[],[[210,210,11],[210,210,22]]);
+  assert.equal(s.spends.length,1);assert.equal(s.sun,400);
+});
+test('cancelling one finger leaves another drag alive and card identity unchanged',()=>{
+  const s=setup({sun:500}),a=[60,60,11],b=[125,60,22];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
+  s.touch('touchcancel',[a],[b]);
+  s.touch('touchend',[],[[210,210,11]]);
+  assert.deepEqual(s.spends,[[0,1,1,100]]);
+});
+test('a neutral mouse contact cannot steal a held plant or end its preview',()=>{
+  const s=setup({sun:500}),a=[60,60,11],b=[750,480,22];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
+  assert.equal(s.ui.index,0);assert.equal(s.ui.currentCF,s.card);
+  s.touch('touchend',[a],[b]);s.touch('touchend',[],[[210,210,11]]);
+  assert.deepEqual(s.spends,[[0,1,1,100]]);
+  assert.equal(s.events.filter(e=>e.type==='mouseup').length,1);
 });

@@ -16,11 +16,15 @@ function setup() {
   context.document = { getElementById: () => canvas, addEventListener: context.addEventListener };
   context.MouseEvent = context.WheelEvent = function(type, init) { Object.assign(this, init, { type }); };
   vm.runInNewContext(script, context);
-  const p = (x, y) => ({ clientX: x, clientY: y });
+  let sActive = [];
+  const p = (x, y, id = 0) => ({ clientX: x, clientY: y, identifier: id });
   function touch(type, touches, changed = [], target = canvas) {
     let blocked = false;
+    if (!changed.length && /touch(start|move)/.test(type)) changed = touches;
+    if (type === "touchcancel" && !changed.length) changed = sActive;
     listeners[type]({ type, target, touches: touches.map(a => p(...a)), changedTouches: changed.map(a => p(...a)),
       preventDefault() { blocked = true; }, stopImmediatePropagation() {} });
+    sActive = touches;
     return blocked;
   }
   return { touch, events, planted, context, listeners };
@@ -46,25 +50,32 @@ test('drag preserves button state and releases at the final finger position', ()
   assert.deepEqual([up.clientX, up.clientY, up.buttons], [850, 550, 0]);
   assert.equal(s.events.some(e => e.button === 2), false);
 });
-test('second finger balances left press; two-finger tap emits one right click', () => {
+test('three fingers keep separate press, motion and release coordinates with no inferred gestures', () => {
   const s = setup();
-  s.touch('touchstart', [[20, 30]]);
-  s.touch('touchstart', [[20, 30], [40, 50]]);
-  s.touch('touchend', [[20, 30]], [[40, 50]]);
-  s.touch('touchend', [], [[20, 30]]);
-  assert.deepEqual(s.events.filter(e => /^(mousedown|mouseup)$/.test(e.type)).map(e => [e.type,e.button]),
-    [['mousedown',0], ['mouseup',0], ['mousedown',2], ['mouseup',2]]);
+  const a=[20,30,11], b=[400,300,22], c=[800,500,33];
+  s.touch('touchstart',[a],[a]);
+  s.touch('touchstart',[b,a],[b]);
+  s.touch('touchstart',[c,a,b],[c]);
+  s.touch('touchmove',[[800,510,33],[25,35,11],b],[[25,35,11]]);
+  s.touch('touchend',[[25,35,11],c],[b]);
+  s.touch('touchmove',[[30,40,11],c],[[30,40,11]]);
+  s.touch('touchend',[c],[[30,40,11]]);
+  s.touch('touchend',[],[c]);
+  assert.deepEqual(s.planted,[[20,30],[400,300],[800,500]]);
+  assert.deepEqual(s.events.filter(e=>e.type==='mouseup').map(e=>[e.clientX,e.clientY]),[[400,300],[30,40],[800,500]]);
+  assert.equal(s.events.filter(e=>e.type==='click').length,3);
+  assert.equal(s.events.some(e=>e.button===2 || e.type==='wheel'),false);
+  assert.equal(s.context.PvzInput.state().length,0);
 });
-test('two-finger scroll emits wheel without right click or leftover press', () => {
-  const s = setup();
-  s.touch('touchstart', [[20, 30]]);
-  s.touch('touchstart', [[20, 30], [40, 50]]);
-  s.touch('touchmove', [[20, 130], [40, 150]]);
-  s.touch('touchend', [[20, 130]]);
-  s.touch('touchend', [], [[20, 130]]);
-  assert.equal(s.events.find(e => e.type === 'wheel').deltaY, -200);
-  assert.equal(s.events.some(e => e.button === 2), false);
-  assert.equal(s.events.filter(e => e.type === 'mouseup').length, 1);
+test('partial cancel releases only that finger and remaining contacts continue',()=>{
+  const s=setup(), a=[20,30,11], b=[400,300,22];
+  s.touch('touchstart',[a],[a]); s.touch('touchstart',[a,b],[b]);
+  s.touch('touchcancel',[a],[b]);
+  assert.equal(s.context.PvzInput.state().length,1);
+  s.touch('touchmove',[[80,90,11]],[[80,90,11]]);
+  s.touch('touchend',[],[[80,90,11]]);
+  assert.equal(s.events.filter(e=>e.type==='mouseup').length,2);
+  assert.deepEqual(s.events.filter(e=>e.type==='click').map(e=>[e.clientX,e.clientY]),[[80,90]]);
 });
 test('cancel and background release exactly once without click', () => {
   for (const action of ['cancel', 'blur']) {

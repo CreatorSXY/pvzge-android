@@ -1,5 +1,9 @@
 Original prompt: Implement direct touch selection and plant placement: tap card then tap cell; drag card and plant on release.
 
+Current user request (2026-11-20): independent continuous multi-finger input, like multiple mice. Replace the single gesture/two-finger right-click/scroll model with identifier-owned contacts. Preserve each held plant's card/coordinates when other fingers move, select cards, collect drops, end or cancel. Keep shared sun/cooldown/occupancy authoritative, including simultaneous releases before an engine frame. Validate real game multi-contact scenarios and preserve 20012 save protection. User is separately backing up with 20012; no new public release requested.
+
+Implemented identifier-keyed touch routing and per-finger planting selection contexts. Scoped synchronous mouse fallback preserves held plant selections and button state. Added direct multi-contact pickup checks around the original dropping update/collect APIs, per-finger swept paths consumed once per frame, and explicit fresh sun/CD/pending-cell guards. Existing engine renders one primary planting preview; other finger action state is retained. Local 36 JS + 2 Python regressions and upstream symbol contracts pass. Added real-game CDP scenarios for three different cards with partial/out-of-order releases, a neutral finger during a held plant, two independent sun pickups plus a midpoint decoy, and same-event cooldown/sun/occupancy guards. These actual game scenarios and Android packaging are not yet verified. Local Docker extraction is being prepared; existing web-game client cannot itself express multi-contact bursts, so the existing CDP game harness is extended for them.
+
 Prior release: picture clarity confirmed on Samsung Tab S10+, synthetic mouse adapter still incorrect.
 Current task: inspect real game UI/Mouse/Square/LnC interfaces, then implement and verify game-level touch adapter. Preserve game affordability, cooldown and placement checks.
 

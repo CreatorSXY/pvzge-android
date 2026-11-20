@@ -1,98 +1,90 @@
-// Canvas-only touch adapter. DOM controls and physical mice keep their native input.
+// Each physical contact owns a gesture. Never infer identity from TouchList order.
 (function () {
     'use strict';
     if (window.PvzInput) return;
-    var gesture = null;
-    var slop = 12; // CSS pixels; independent of Android density and render profile.
+    var contacts = new Map();
+    var slop = 12;
     function point(t) { return { x: t.clientX, y: t.clientY }; }
-    function center(t) { return { x: (t[0].clientX + t[1].clientX) / 2,
-        y: (t[0].clientY + t[1].clientY) / 2 }; }
-    function mouse(type, p, button, buttons) {
-        gesture.canvas.dispatchEvent(new MouseEvent(type, {
+    function bridge() { return window.PvzDirectTouch; }
+    function mouse(g, type, button, buttons) {
+        g.canvas.dispatchEvent(new MouseEvent(type, {
             view: window, bubbles: true, cancelable: true,
-            clientX: p.x, clientY: p.y, button: button, buttons: buttons
+            clientX: g.last.x, clientY: g.last.y, button: button, buttons: buttons
         }));
     }
-    function move(p, buttons) { mouse('mousemove', p, 0, buttons); }
-    function release() {
-        if (gesture && gesture.down) {
-            mouse('mouseup', gesture.last, 0, 0);
-            gesture.down = false;
+    function scoped(g, fn) {
+        var api = bridge();
+        if (api && api.mouseAction) api.mouseAction(g.mouse, g.last, fn);
+        else fn();
+    }
+    function sync() {
+        var api = bridge();
+        if (api && api.setContacts) api.setContacts(Array.from(contacts.values()).map(function (g) {
+            return { id: g.id, x: g.last.x, y: g.last.y };
+        }));
+    }
+    function finish(g, cancelled) {
+        var api = bridge();
+        if (g.direct) {
+            if (cancelled) api.cancel(g.direct);
+            else api.end(g.direct, g.last, g.moved);
+        } else if (g.down) {
+            scoped(g, function () {
+                mouse(g, 'mousemove', 0, 1); mouse(g, 'mouseup', 0, 0);
+                if (!cancelled) mouse(g, 'click', 0, 0);
+            });
+            g.down = false;
         }
     }
     function handle(e) {
-        if (e.type === 'touchstart' && !gesture) {
-            var canvas = document.getElementById('GameCanvas');
-            if (!canvas || e.target !== canvas) return;
-            gesture = { canvas: canvas, last: point(e.touches[0]), down: false, multi: false, moved: false, start: point(e.touches[0]), direct: null };
+        var canvas = document.getElementById('GameCanvas');
+        var changed = Array.from(e.changedTouches);
+        var owned = changed.filter(function (t) {
+            return contacts.has(t.identifier) || (e.type === 'touchstart' && (t.target || e.target) === canvas);
+        });
+        if (!canvas || !owned.length) return;
+        if (owned.length === changed.length && e.target === canvas) {
+            e.preventDefault(); e.stopImmediatePropagation();
         }
-        if (!gesture) return;
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        if (e.type === 'touchstart') {
-            if (e.touches.length === 1 && !gesture.multi) {
-                // Update the engine's cached cursor BEFORE pressing at a new location.
-                gesture.direct = window.PvzDirectTouch && window.PvzDirectTouch.begin(gesture.last);
-                if (!gesture.direct) {
-                    move(gesture.last, 0);
-                    mouse('mousedown', gesture.last, 0, 1);
-                    gesture.down = true;
+        owned.forEach(function (t) {
+            var id = t.identifier, g = contacts.get(id);
+            if (e.type === 'touchstart') {
+                if (g) return;
+                g = { id: id, canvas: canvas, last: point(t), start: point(t), moved: false, down: false };
+                contacts.set(id, g);
+                var api = bridge();
+                g.direct = api && api.begin(g.last, id);
+                if (!g.direct) {
+                    g.mouse = api && api.mouseToken ? api.mouseToken(id) : null;
+                    scoped(g, function () { mouse(g, 'mousemove', 0, 0); mouse(g, 'mousedown', 0, 1); });
+                    g.down = true;
                 }
-            } else if (e.touches.length >= 2) {
-                if (gesture.direct) window.PvzDirectTouch.cancel(gesture.direct);
-                release();
-                gesture.multi = true;
-                gesture.last = gesture.origin = center(e.touches);
-                if (e.touches.length > 2) gesture.moved = true;
-            }
-        } else if (e.type === 'touchmove') {
-            if (!gesture.multi && e.touches.length === 1) {
-                gesture.last = point(e.touches[0]);
-                if (Math.hypot(gesture.last.x - gesture.start.x, gesture.last.y - gesture.start.y) > slop) gesture.moved = true;
-                if (gesture.direct) window.PvzDirectTouch.move(gesture.direct, gesture.last);
-                else move(gesture.last, 1);
-            } else if (gesture.multi && e.touches.length === 2) {
-                var p = center(e.touches);
-                if (gesture.moved || Math.hypot(p.x - gesture.origin.x, p.y - gesture.origin.y) > slop) {
-                    gesture.moved = true;
-                    move(p, 0);
-                    gesture.canvas.dispatchEvent(new WheelEvent('wheel', {
-                        view: window, bubbles: true, cancelable: true, clientX: p.x, clientY: p.y,
-                        deltaX: (gesture.last.x - p.x) * 2, deltaY: (gesture.last.y - p.y) * 2, deltaMode: 0
-                    }));
-                    gesture.last = p;
+            } else if (g) {
+                g.last = point(t);
+                if (Math.hypot(g.last.x - g.start.x, g.last.y - g.start.y) > slop) g.moved = true;
+                if (e.type === 'touchmove') {
+                    if (g.direct) bridge().move(g.direct, g.last);
+                    else scoped(g, function () { mouse(g, 'mousemove', 0, 1); });
+                } else {
+                    contacts.delete(id);
+                    finish(g, e.type === 'touchcancel');
                 }
             }
-        } else if (e.type === 'touchcancel') {
-            if (gesture.direct) window.PvzDirectTouch.cancel(gesture.direct);
-            release();
-            gesture = null;
-        } else if (e.type === 'touchend' && e.touches.length === 0) {
-            if (!gesture.multi) {
-                if (e.changedTouches.length) gesture.last = point(e.changedTouches[0]);
-                if (Math.hypot(gesture.last.x - gesture.start.x, gesture.last.y - gesture.start.y) > slop) gesture.moved = true;
-                if (gesture.direct) window.PvzDirectTouch.end(gesture.direct, gesture.last, gesture.moved);
-                else {
-                    move(gesture.last, gesture.down ? 1 : 0);
-                    release();
-                    mouse('click', gesture.last, 0, 0);
-                }
-            } else if (!gesture.moved) {
-                move(gesture.last, 0);
-                mouse('mousedown', gesture.last, 2, 2);
-                mouse('mouseup', gesture.last, 2, 0);
-                mouse('contextmenu', gesture.last, 2, 0);
-            }
-            gesture = null;
-        }
+        });
+        sync();
     }
     ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (type) {
         document.addEventListener(type, handle, { capture: true, passive: false });
     });
     function cancel() {
-        if (gesture && gesture.direct) window.PvzDirectTouch.cancel(gesture.direct);
-        release(); gesture = null;
+        var old = Array.from(contacts.values()); contacts.clear();
+        old.forEach(function (g) { finish(g, true); }); sync();
     }
     window.addEventListener('blur', cancel);
-    window.PvzInput = { cancel: cancel };
+    document.addEventListener('visibilitychange', function () { if (document.hidden) cancel(); });
+    window.PvzInput = { cancel: cancel, state: function () {
+        return Array.from(contacts.values()).map(function (g) {
+            return { id: g.id, x: g.last.x, y: g.last.y, planting: !!g.direct, down: g.down };
+        });
+    } };
 })();
