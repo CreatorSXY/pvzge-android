@@ -11,7 +11,8 @@ javac --release 8 -cp "$android_jar" -d "$base/classes" tests/android-wave/WaveP
 "$build_tools/aapt" package -f -M tests/android-wave/AndroidManifest.xml -I "$android_jar" -F "$base/probe.apk"
 (cd "$base/dex" && "$build_tools/aapt" add "$base/probe.apk" classes.dex)
 "$build_tools/apksigner" sign --ks keystore.jks --ks-key-alias pvzge --ks-pass pass:pvzge123 --key-pass pass:pvzge123 "$base/probe.apk"
-gh release download "$APK_TAG" --repo "$GITHUB_REPOSITORY" -p app-release.apk -D "$base"
+gh run download "$APK_RUN" --repo "$GITHUB_REPOSITORY" -n gardendless-android-review -D "$base/package"
+cp "$base/package/app/build/outputs/apk/release/app-release.apk" "$base/app-release.apk"
 export ANDROID_USER_HOME="$base/android-user" ANDROID_EMULATOR_HOME="$base/android-user" ANDROID_AVD_HOME="$base/android-user/avd"
 mkdir -p "$ANDROID_AVD_HOME"
 "$sdk_root/cmdline-tools/latest/bin/sdkmanager" 'system-images;android-35;google_apis;x86_64' >/dev/null
