@@ -6,6 +6,8 @@ Save protection updates preserve installed game resources. Before constructing t
 
 This protection starts **after** the signed update is installed. It cannot provide a backup before that first installation or guarantee a particular device's outcome. Do not uninstall the old app or clear its data. Private snapshots remain inside app data and are lost on uninstall; keep the verified JSON somewhere independent, such as Downloads. Private snapshot ZIPs are diagnostic copies, not in-game JSON import files.
 
+The all-player JSON is the complete stored player list. The original game's player import accepts one player object at a time. Open `tools/save-backup.html` in a browser without uploading your save anywhere, select the all-player backup, and download each player's individual JSON for the original player import. The page works offline and preserves unknown player properties. The repaired in-game export button already produces the original single-player format.
+
 - Tap a card to select it, then tap a lawn cell once to plant. Or drag a card to a cell and release to plant.
 - Card selection calls the original `UIInGame.tryChangingIndex`. The current finger position is converted through Cocos, the lawn cell/preview updates immediately, and release calls the original `LnC.PlaceUIPlant` once. Planting emits no synthetic DOM mouse presses. Original sun, cooldown, terrain and occupancy rules remain in effect.
 - Other menus/tools still use the existing mouse adapter; this is a WebView app with game-level planting adaptation, not an Android-native game engine rebuild.
