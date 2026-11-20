@@ -83,6 +83,7 @@ const server=http.createServer((req,res)=>{
       player:!!System.get('chunks:///_virtual/PlayerProperties.ts')?.AllPlayerProperties?.currentPlayer}));
     console.log('Loaded official game:',JSON.stringify(before));
     if(before.waveFix.legacy!==false||before.waveFix.applied)throw Error('Modern official wave logic was unexpectedly replaced');
+    await page.waitForFunction(()=>!System.get('chunks:///_virtual/KeyListener.ts').KeyListener.screenColorTweening,null,{timeout:30000});
     await Promise.race([page.evaluate(async()=>{
       const K=System.get('chunks:///_virtual/KeyListener.ts').KeyListener;
       await K.goToLevel(['tutorial1'],[],false,false);
