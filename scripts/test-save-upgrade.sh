@@ -10,7 +10,7 @@ mkdir -p "$ANDROID_AVD_HOME"
 "$sdk_root/cmdline-tools/latest/bin/sdkmanager" 'system-images;android-35;google_apis;x86_64' >/dev/null
 printf 'no\n' | "$sdk_root/cmdline-tools/latest/bin/avdmanager" create avd --force --name pvzge-save --path "$ANDROID_AVD_HOME/pvzge-save.avd" --package 'system-images;android-35;google_apis;x86_64' --device pixel_6
 "$sdk_root/emulator/emulator" -list-avds | tee work/save-upgrade/avds.txt
-rg '^pvzge-save$' work/save-upgrade/avds.txt
+grep -x 'pvzge-save' work/save-upgrade/avds.txt
 sudo chown "$(id -u):$(id -g)" /dev/kvm
 "$sdk_root/emulator/emulator" -avd pvzge-save -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 3072 -partition-size 4096 >work/save-upgrade/emulator.log 2>&1 &
 emulator_pid=$!
@@ -38,9 +38,9 @@ new_certificate=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' work/sav
 adb install -r "$old_apk"
 adb install -r "$test_apk"
 adb shell am instrument -w -e phase seed com.pvzge.gardendless.test/com.pvzge.gardendless.SaveProtectionInstrumentation | tee work/save-upgrade/seed.txt
-rg 'PASS:seed' work/save-upgrade/seed.txt
+grep -F 'PASS:seed' work/save-upgrade/seed.txt
 adb shell am force-stop com.pvzge.gardendless
 adb install -r "$new_apk"
 adb shell am instrument -w -e phase verify com.pvzge.gardendless.test/com.pvzge.gardendless.SaveProtectionInstrumentation | tee work/save-upgrade/verify.txt
-rg 'PASS:verify' work/save-upgrade/verify.txt
+grep -F 'PASS:verify' work/save-upgrade/verify.txt
 adb exec-out screencap -p >work/save-upgrade/verified.png

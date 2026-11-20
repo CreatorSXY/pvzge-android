@@ -122,7 +122,19 @@ jobs:
             cat app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt 2>/dev/null || true
             exit 1
           }
+      - name: Save compiled package for review and diagnostics
+        if: steps.source.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gardendless-android-review
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+            build-source.json
+            game-version.txt
+          retention-days: 14
       - name: Verify signed upgrade from 20004 and native save export
+        timeout-minutes: 12
         if: steps.source.outputs.build == 'true'
         run: |
           # These are generated build inputs in this disposable runner, not user data.
@@ -138,16 +150,6 @@ jobs:
             work/save-upgrade/*.txt
             work/save-upgrade/*.log
             work/save-upgrade/*.png
-      - name: Save review build
-        if: steps.source.outputs.build == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: gardendless-android-review
-          path: |
-            app/build/outputs/apk/release/app-release.apk
-            build-source.json
-            game-version.txt
-          retention-days: 14
       - name: Publish APK with source provenance
         if: steps.source.outputs.build == 'true' && github.event_name == 'workflow_dispatch' && inputs.publish
         env:
