@@ -44,12 +44,12 @@ jobs:
           Path('build-source.json').write_text(json.dumps(source, indent=2))
           PY
           # No release yet is expected on a new fork; other API errors must fail.
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=1" > releases.json
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
           python3 - <<'PY'
           import json, os, urllib.request
           from pathlib import Path
           source = json.loads(Path('build-source.json').read_text())
-          releases = json.loads(Path('releases.json').read_text())
+          releases = [r for r in json.loads(Path('releases.json').read_text()) if not r['draft']]
           previous = None
           if releases:
               asset = next((a for a in releases[0]['assets'] if a['name'] == 'build-source.json'), None)

@@ -62,7 +62,9 @@ jobs:
               'Verified in the official game with browser touch input: first-tap planting, drag preview, release-to-plant, original sun cost, and zero synthetic mouse presses for planting. Android compilation and lint passed. Samsung Tab S10+ verification remains pending.\n\n'
               'Full-resolution rendering is retained. Other controls retain the existing adapter.\n\n'
               'Built and tested in ' + run['html_url'] + '. This release publishes that exact APK without rebuilding.\n\n'
-              'Export your save before updating.\n')
+              'Save protection: before opening the game after an upgrade, create and verify a private snapshot, then require an all-player JSON export to a location outside the app. The exported document is read back and checked before continuing. Existing installed game resources are retained.\n\n'
+              'The game export button now handles Blob downloads, including immediate URL revocation. Back → Export all players provides a native export path.\n\n'
+              'A signed upgrade from the actual 20004 APK is tested in an Android emulator using a seeded WebView save. This does not back up your device, and the first snapshot can only happen after installing the update. Do not uninstall or clear app data. Real-device verification remains pending.\n')
           with open(os.environ['GITHUB_ENV'], 'a') as out:
               out.write('RELEASE_VERSION=' + version + '\nSOURCE_SHA=' + run['head_sha'] + '\n')
           PY

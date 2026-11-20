@@ -1,6 +1,10 @@
 # Gardendless Android — CreatorSXY fork
 
-This fork directly connects touch planting to the game APIs and defaults to full resolution on devices with more than 4 GiB RAM. Export saves before testing a new APK.
+This fork directly connects touch planting to the game APIs and defaults to full resolution on devices with more than 4 GiB RAM.
+
+Save protection updates preserve installed game resources. Before constructing the first WebView after an upgrade, the app makes and verifies a private snapshot of existing WebView data, preferences and databases. An isolated page at the original origin reads the all-player save without running the game. The app requires a JSON export to a location outside its own storage and verifies that document by reading it back before allowing the game to start. Back → Export all players also provides a native export path. The original game's Blob export is bridged to Android's document picker.
+
+This protection starts **after** the signed update is installed. It cannot provide a backup before that first installation or guarantee a particular device's outcome. Do not uninstall the old app or clear its data. Private snapshots remain inside app data and are lost on uninstall; keep the verified JSON somewhere independent, such as Downloads. Private snapshot ZIPs are diagnostic copies, not in-game JSON import files.
 
 - Tap a card to select it, then tap a lawn cell once to plant. Or drag a card to a cell and release to plant.
 - Card selection calls the original `UIInGame.tryChangingIndex`. The current finger position is converted through Cocos, the lawn cell/preview updates immediately, and release calls the original `LnC.PlaceUIPlant` once. Planting emits no synthetic DOM mouse presses. Original sun, cooldown, terrain and occupancy rules remain in effect.
