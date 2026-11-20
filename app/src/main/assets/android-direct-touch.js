@@ -6,6 +6,7 @@
     var refs = {};
     var held = new Set(), foreground = null, armed = null, armedTool = null, contacts = new Map(), drops = new Set();
     var freeUses = new WeakMap();
+    var mice = new Map(), mouseForeground = null;
     var selectionFields = ['index', 'currentCF', 'currentFreeCF', 'currentDroppedPlantCard',
         'willCostSun', 'currentPlantStartingHeight'];
     var exportsByModule = {
@@ -115,9 +116,18 @@
         foreground = next && held.has(next) ? next : null;
         if (next) activate(next, true);
         else if (usable(ui)) {
+            if (restoreMouse(ui)) return;
             if (selected(ui)) ui.tryChangingIndex(-1);
             if (armedTool && armedTool.ui === ui) { apply(ui, armedTool.selection); locate(ui, armedTool.last); }
         }
+    }
+    function restoreMouse(ui) {
+        var next = mouseForeground && mice.get(mouseForeground.id) === mouseForeground && mouseForeground.ui === ui ? mouseForeground : null;
+        mice.forEach(function (token) { if (!next && token.ui === ui && token.last) next = token; });
+        if (!next || !next.last) return false;
+        mouseForeground = next;
+        apply(ui, next.selection); ui.mouseDown = next.down; locate(ui, next.last);
+        return true;
     }
     function canSpend(token) {
         var ca = token.card.ca, ui = token.ui;
@@ -340,6 +350,7 @@
                 next.set(p.id, { screen: position(p), current: current, segments: segments });
             });
             contacts = next;
+            mice.forEach(function (token, id) { if (!next.has(id)) mice.delete(id); });
             if (refs.Rectangle && usable(refs.UIInGame && refs.UIInGame.component)) {
                 var paths = Array.from(contacts.values());
                 drops.forEach(function (drop) { pickup(drop, paths); });
@@ -350,9 +361,15 @@
             var tool = armedTool && armedTool.ui === ui ? armedTool.selection : null;
             var value = ui && Object.assign({}, tool || snapshot(ui));
             if (value && held.size && !tool) { value.index = -1; value.currentCF = null; value.willCostSun = 0; }
-            return { id: id, ui: ui, selection: value, down: false, first: true };
+            var token = { id: id, ui: ui, selection: value, down: false, first: true };
+            mice.set(id, token); return token;
         },
         mouseAction: function (token, p, fn) {
+            if (token) {
+                token.last = p;
+                if (token.ending) mice.delete(token.id);
+                else mouseForeground = token;
+            }
             var ui = refs.UIInGame && refs.UIInGame.component;
             if (!token || !usable(ui)) { if (!token || token.ui === ui) fn(); return; }
             if (token.ui !== ui) return;
@@ -370,6 +387,7 @@
                 ui.mouseDown = down; ui.MouseClickCoolingDown = cool; ui.MouseListenOffThisTick = listen;
                 if (engine.input) engine.input._dispatchImmediately = immediate;
                 if (held.size || valid(armed)) restore(ui);
+                else if (!restoreMouse(ui)) ui.mouseDown = false;
             }
         },
         state: function () {

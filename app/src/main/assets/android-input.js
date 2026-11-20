@@ -29,6 +29,7 @@
             if (cancelled) api.cancel(g.direct);
             else api.end(g.direct, g.last, g.moved);
         } else if (g.down) {
+            if (g.mouse) g.mouse.ending = true;
             scoped(g, function () {
                 mouse(g, 'mousemove', 0, 1); mouse(g, 'mouseup', 0, 0);
                 if (!cancelled) mouse(g, 'click', 0, 0);

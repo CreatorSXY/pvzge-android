@@ -7,7 +7,11 @@ const input = readFileSync('app/src/main/assets/android-input.js', 'utf8');
 function setup(options={}) {
   const events = [], listeners = {}, placed = [], calls = [], spends=[],usedCards=[];
   const rect = { left: 40, top: 20, width: 800, height: 500 };
-  const canvas = { getBoundingClientRect: () => rect, dispatchEvent: e => events.push(e) };
+  const canvas = { getBoundingClientRect: () => rect, dispatchEvent(e) {
+    events.push(e);
+    if(options.mouseUI && e.type==='mousedown')ui.mouseDown=true;
+    if(options.mouseUI && e.type==='mouseup')ui.mouseDown=false;
+  } };
   class Vec2 { constructor(x = 0, y = 0) { this.x = x; this.y = y; } }
   class Vec3 extends Vec2 { constructor(x,y,z) { super(x,y); this.z = z; } }
   const cc = { Vec2, Vec3, UITransform: function() {}, view: {
@@ -168,4 +172,12 @@ test('one disposable card cannot be consumed twice while its node awaits destruc
   s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
   s.touch('touchend',[],[[210,210,11],[270,270,22]]);
   assert.deepEqual(s.usedCards,['free-a']);
+});
+test('non-planting holds remain visible to game frames and releasing one restores the survivor',()=>{
+  const s=setup({mouseUI:true}),a=[750,480,11],b=[780,450,22];
+  s.touch('touchstart',[a],[a]);assert.equal(s.ui.mouseDown,true);
+  s.touch('touchstart',[a,b],[b]);assert.equal(s.ui.mouseDown,true);
+  s.touch('touchend',[a],[b]);assert.equal(s.ui.mouseDown,true);
+  s.touch('touchcancel',[],[a]);assert.equal(s.ui.mouseDown,false);
+  assert.equal(s.api.state().contacts,0);
 });
