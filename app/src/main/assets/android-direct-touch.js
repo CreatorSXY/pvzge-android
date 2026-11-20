@@ -5,6 +5,7 @@
     var engine = null;
     var refs = {};
     var held = new Set(), foreground = null, armed = null, armedTool = null, contacts = new Map(), drops = new Set();
+    var freeUses = new WeakMap();
     var selectionFields = ['index', 'currentCF', 'currentFreeCF', 'currentDroppedPlantCard',
         'willCostSun', 'currentPlantStartingHeight'];
     var exportsByModule = {
@@ -14,7 +15,8 @@
         'chunks:///_virtual/levelController.ts': ['LevelPlay'],
         'chunks:///_virtual/SunCount.ts': ['SunCount'],
         'chunks:///_virtual/CharacterManager.ts': ['Rectangle', 'LineSegment'],
-        'chunks:///_virtual/NodePools.ts': ['destroyNodeArrayPooly'],
+        'chunks:///_virtual/NodePools.ts': ['destroyNodeArrayPooly', 'destroyPooly'],
+        'chunks:///_virtual/Conveyor.ts': ['Conveyor'],
         'chunks:///_virtual/dropping.ts': ['dropping']
     };
     function usable(ui) {
@@ -55,19 +57,28 @@
         return cell;
     }
     function cardAt(ui) {
+        function hit(card) {
+            var node = card && card.node;
+            if (!node || !node.activeInHierarchy) return false;
+            var transform = node.getComponent(engine.UITransform);
+            return transform && refs.Mouse.judgeInUITransform(transform);
+        }
         var cards = ui.cards && ui.cards.CFs || [];
         for (var i = 0; i < cards.length && i < 8; i++) {
-            var node = cards[i] && cards[i].node;
-            if (!node || !node.activeInHierarchy) continue;
-            var transform = node.getComponent(engine.UITransform);
-            if (transform && refs.Mouse.judgeInUITransform(transform)) return i;
+            if (hit(cards[i])) return { index: i, card: cards[i] };
         }
-        var free = ui.currentFreeCF && ui.currentFreeCF.node;
-        if (free && free.activeInHierarchy) {
-            var freeTransform = free.getComponent(engine.UITransform);
-            if (freeTransform && refs.Mouse.judgeInUITransform(freeTransform)) return 8;
+        var dropped = ui.DroppedCards || [];
+        for (var d = dropped.length - 1; d >= 0; d--) {
+            if (hit(dropped[d].cf)) return { index: 8, card: dropped[d].cf, dropped: dropped[d] };
         }
-        return -1;
+        var conveyor = refs.Conveyor && refs.Conveyor.component;
+        if (conveyor && conveyor.node.activeInHierarchy) {
+            var free = conveyor.getCards();
+            for (var f = free.length - 1; f >= 0; f--) {
+                if (hit(free[f])) return { index: 8, card: free[f], conveyor: conveyor };
+            }
+        }
+        return hit(ui.currentFreeCF) ? { index: 8, card: ui.currentFreeCF } : null;
     }
     function snapshot(ui) {
         var value = {};
@@ -78,11 +89,12 @@
     function valid(token) {
         return !!(token && !token.cancelled && usable(token.ui) && refs.UIInGame.component === token.ui &&
             refs.LevelPlay.component === token.level && token.card && token.card.node.activeInHierarchy &&
-            (token.index === 8 || token.ui.cards.CFs[token.index] === token.card));
+            (token.index === 8 ? token.freeUse === (freeUses.get(token.card) || 0) : token.ui.cards.CFs[token.index] === token.card));
     }
     function tokenFor(ui, value, p, fromCard, id) {
         return { ui: ui, level: refs.LevelPlay.component, selection: value, index: value.index,
-            card: value.currentCF, last: p, fromCard: fromCard, id: id, cancelled: false };
+            card: value.currentCF, last: p, fromCard: fromCard, id: id, cancelled: false,
+            freeUse: value.currentCF ? freeUses.get(value.currentCF) || 0 : 0 };
     }
     function activate(token, visual) {
         var ui = token.ui, changed = ui.currentCF !== token.card || ui.index !== token.index;
@@ -109,10 +121,13 @@
     }
     function canSpend(token) {
         var ca = token.card.ca, ui = token.ui;
+        var upper = ui.cards.cardsUIUpper && ui.cards.cardsUIUpper[token.index];
+        var refreshed = upper && typeof upper.cardUpdate === 'function';
+        // Refresh original affordability/cooldown logic without advancing game time.
+        if (refreshed) upper.cardUpdate(0);
         if (!ca || !ca.getSelectable()) return false;
         var cost = Number(token.card.SUNCOST);
-        if (refs.SunCount && Number.isFinite(cost) && refs.SunCount.Value < cost) return false;
-        var upper = ui.cards.cardsUIUpper && ui.cards.cardsUIUpper[token.index];
+        if (!refreshed && !ca.free && refs.SunCount && Number.isFinite(cost) && refs.SunCount.Value < cost) return false;
         return !(upper && upper.CD > 0);
     }
     function world(p) {
@@ -171,6 +186,45 @@
         };
         Type.prototype.__pvzMultiTouch = true;
     }
+    function installPreview(Type) {
+        if (!Type || !Type.prototype || Type.prototype.__pvzPreviewInstalled) return;
+        var original = Type.prototype.plantInHand;
+        if (typeof original !== 'function') return;
+        function clean(ui, destroyLoose) {
+            var loose = destroyLoose && ui.plantReady && !ui.plantReady.parent ? ui.plantReady : null;
+            if (refs.destroyNodeArrayPooly) refs.destroyNodeArrayPooly(ui.plantInHandLayer.children);
+            if (loose && refs.destroyPooly) refs.destroyPooly(loose);
+            ui.plantReady = null;
+        }
+        Type.prototype.plantInHand = function (card, preview) {
+            var ui = this;
+            var queue = ui.__pvzPreviewQueue || (ui.__pvzPreviewQueue = { version: 0, pending: false, desired: null });
+            queue.version++; queue.desired = preview === false ? null : card;
+            clean(ui);
+            function start() {
+                var version = queue.version, desired = queue.desired;
+                queue.pending = true;
+                return Promise.resolve(original.call(ui, desired, true)).then(function (value) {
+                    queue.pending = false;
+                    if (queue.version !== version) {
+                        clean(ui, true);
+                        if (queue.desired && ui.currentCF === queue.desired) return start();
+                    }
+                    return value;
+                }, function (error) { queue.pending = false; throw error; });
+            }
+            if (!card || preview === false || queue.pending) {
+                var result = original.call(ui, card, false);
+                if (card) {
+                    ui.willCostSun = card.SUNCOST;
+                    ui.currentPlantStartingHeight = Number(card.Prop && card.Prop.StartingHeight) || 0;
+                }
+                return result;
+            }
+            return start();
+        };
+        Type.prototype.__pvzPreviewInstalled = true;
+    }
     var api = {
         installEngine: function (cc) {
             engine = cc;
@@ -195,6 +249,7 @@
                             else if (key && typeof key === 'object' && key[symbol]) refs[symbol] = key[symbol];
                         });
                         if (refs.dropping) installDrops(refs.dropping);
+                        if (refs.UIInGame) installPreview(refs.UIInGame);
                         return result;
                     }, context);
                 });
@@ -207,14 +262,24 @@
             if (!held.size && armed && (ui.index !== armed.index || ui.currentCF !== armed.card)) armed = null;
             if (collectAt(p)) return { kind: 'collect', ui: ui, level: refs.LevelPlay.component, cancelled: false };
             var cell = locate(ui, p);
-            var card = cardAt(ui);
-            if (card >= 0) {
+            var hit = cardAt(ui), card = hit && hit.index;
+            if (hit) {
                 var value;
-                if (!held.size) { ui.tryChangingIndex(card); value = snapshot(ui); armed = null; armedTool = null; }
+                var upper = ui.cards.cardsUIUpper && ui.cards.cardsUIUpper[card];
+                if (upper && typeof upper.cardUpdate === 'function') upper.cardUpdate(0);
+                if (!held.size) {
+                    if (hit.dropped) hit.dropped.choose();
+                    else if (hit.conveyor) hit.conveyor.chooseCard(hit.card, hit.card.ca);
+                    else ui.tryChangingIndex(card);
+                    value = snapshot(ui); armed = null; armedTool = null;
+                }
                 else {
                     value = snapshot(ui); value.index = card;
-                    value.currentCF = card === 8 ? ui.currentFreeCF : ui.cards.CFs[card];
+                    value.currentCF = hit.card;
+                    value.currentFreeCF = card === 8 ? hit.card : null;
+                    value.currentDroppedPlantCard = hit.dropped || null;
                     value.willCostSun = value.currentCF && value.currentCF.SUNCOST;
+                    value.currentPlantStartingHeight = Number(hit.card.Prop && hit.card.Prop.StartingHeight) || 0;
                 }
                 var token = tokenFor(ui, value, p, true, id);
                 if (value.index !== card || !valid(token) || !canSpend(token)) { token.cancelled = true; return token; }
@@ -253,6 +318,7 @@
                 if (!cell || typeof cell.PlaceUIPlant !== 'function' || !cell.isInLawn() || cell.spawningPromiseCount > 0) return false;
                 cell.PlaceUIPlant();
                 committed = token.ui.index !== token.index;
+                if (committed && token.index === 8) freeUses.set(token.card, token.freeUse + 1);
                 if (committed && armed === token.armed) armed = null;
                 return committed;
             } finally {

@@ -10,6 +10,7 @@ const required = {
   'SunCount.ts': ['SunCount', 'CurrentValue'],
   'CharacterManager.ts': ['Rectangle', 'LineSegment', 'createRectangleNodeCenter', 'createLineLenDir'],
   'NodePools.ts': ['destroyNodeArrayPooly'],
+  'Conveyor.ts': ['Conveyor', 'getCards', 'chooseCard', 'spliceCard'],
   'dropping.ts': ['dropping', 'characterUpdate', 'characterOnDisable', 'collectable_after', 'mouseListen']
 };
 const starts = [...source.matchAll(/System\.register\("chunks:\/\/\/_virtual\/([^"/]+)"/g)];

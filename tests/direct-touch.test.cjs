@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const direct = readFileSync('app/src/main/assets/android-direct-touch.js', 'utf8');
 const input = readFileSync('app/src/main/assets/android-input.js', 'utf8');
 function setup(options={}) {
-  const events = [], listeners = {}, placed = [], calls = [], spends=[];
+  const events = [], listeners = {}, placed = [], calls = [], spends=[],usedCards=[];
   const rect = { left: 40, top: 20, width: 800, height: 500 };
   const canvas = { getBoundingClientRect: () => rect, dispatchEvent: e => events.push(e) };
   class Vec2 { constructor(x = 0, y = 0) { this.x = x; this.y = y; } }
@@ -30,11 +30,16 @@ function setup(options={}) {
     }
   };
   let sun = options.sun ?? 150;
+  const freePool=['free-a','free-b'].map((Type,i)=>({Type,node:node({x:400+i*65,y:420}),SUNCOST:0,ca:{free:true,getSelectable:()=>true}}));
+  const Conveyor={component:{node:node(),getCards:()=>options.free?freePool:[],chooseCard(cf){
+    ui.index=8;ui.currentCF=ui.currentFreeCF=cf;ui.willCostSun=0;
+  }}};
   const cells = Array.from({length:5},(_,r)=>Array.from({length:9},(_,c)=>({
     lIndex:r,cIndex:c,isInLawn:()=>true,onMouseLeave(){calls.push(['leave',r,c]);},
     onMouseEnter(){calls.push(['preview',r,c]);},
     PlaceUIPlant(){const cost=ui.willCostSun;if(this.occupied||sun<cost)return;
-      placed.push([r,c]);spends.push([ui.index,r,c,cost]);
+      placed.push([r,c]);spends.push([ui.index,r,c,cost]);usedCards.push(ui.currentCF.Type);
+      if(ui.index===8)freePool.splice(freePool.indexOf(ui.currentCF),1); // Node destruction may be deferred until the frame ends.
       if(options.pending)this.spawningPromiseCount=(this.spawningPromiseCount||0)+1;else this.occupied=true;
       if(options.cooldown)ui.cards.cardsUIUpper[ui.index].CD=10;
       sun-=cost;ui.index=-1;ui.currentCF=null;}
@@ -53,8 +58,8 @@ function setup(options={}) {
   const api=context.PvzDirectTouch;
   const system={register(name,deps,declare){declare((k,v)=>v,{}).execute();return name;}};
   api.captureModules(system);
-  for(const [name,value] of Object.entries({UIInGame:{component:ui},Mouse,Square,LevelPlay,SunCount:{get Value(){return sun;}}})) {
-    const module={UIInGame:'UI',Mouse:'Mouse',Square:'Square',LevelPlay:'levelController',SunCount:'SunCount'}[name];
+  for(const [name,value] of Object.entries({UIInGame:{component:ui},Mouse,Square,LevelPlay,Conveyor,SunCount:{get Value(){return sun;}}})) {
+    const module={UIInGame:'UI',Mouse:'Mouse',Square:'Square',LevelPlay:'levelController',SunCount:'SunCount',Conveyor:'Conveyor'}[name];
     system.register('chunks:///_virtual/'+module+'.ts',[],publish=>({execute(){publish(name,value);}}));
   }
   api.installEngine(cc);vm.runInNewContext(input,context);
@@ -67,7 +72,7 @@ function setup(options={}) {
       preventDefault(){},stopImmediatePropagation(){}});last=points;
   }
   function tap(p){touch('touchstart',[p]);touch('touchend',[],[p]);}
-  return {api,touch,tap,events,placed,calls,spends,ui,card,cards,cells,ca,LevelPlay,Mouse,get sun(){return sun;}};
+  return {api,touch,tap,events,placed,calls,spends,usedCards,ui,card,cards,cells,ca,LevelPlay,Mouse,get sun(){return sun;}};
 }
 test('tap card then first tap on a new cell plants once without any DOM mouse events',()=>{
   const s=setup();s.tap([60,60]);assert.equal(s.ui.index,0);assert.equal(s.placed.length,0);
@@ -151,4 +156,16 @@ test('a neutral mouse contact cannot steal a held plant or end its preview',()=>
   s.touch('touchend',[a],[b]);s.touch('touchend',[],[[210,210,11]]);
   assert.deepEqual(s.spends,[[0,1,1,100]]);
   assert.equal(s.events.filter(e=>e.type==='mouseup').length,1);
+});
+test('two conveyor cards retain their own identity while released in reverse order',()=>{
+  const s=setup({free:true,sun:0}),a=[460,60,11],b=[525,60,22];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
+  s.touch('touchend',[a],[[270,270,22]]);s.touch('touchend',[],[[210,210,11]]);
+  assert.deepEqual(s.usedCards,['free-b','free-a']);assert.equal(s.sun,0);
+});
+test('one disposable card cannot be consumed twice while its node awaits destruction',()=>{
+  const s=setup({free:true,sun:0}),a=[460,60,11],b=[460,60,22];
+  s.touch('touchstart',[a],[a]);s.touch('touchstart',[a,b],[b]);
+  s.touch('touchend',[],[[210,210,11],[270,270,22]]);
+  assert.deepEqual(s.usedCards,['free-a']);
 });

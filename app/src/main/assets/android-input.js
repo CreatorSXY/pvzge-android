@@ -84,7 +84,7 @@
     document.addEventListener('visibilitychange', function () { if (document.hidden) cancel(); });
     window.PvzInput = { cancel: cancel, state: function () {
         return Array.from(contacts.values()).map(function (g) {
-            return { id: g.id, x: g.last.x, y: g.last.y, planting: !!g.direct, down: g.down };
+            return { id: g.id, x: g.last.x, y: g.last.y, planting: !!g.direct && g.direct.kind !== 'collect', down: g.down };
         });
     } };
 })();

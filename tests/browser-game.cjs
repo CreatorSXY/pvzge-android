@@ -5,6 +5,8 @@ const http = require('node:http');
 const { chromium } = require(process.env.PVZ_PLAYWRIGHT_PATH || 'playwright');
 const root = path.resolve(process.env.PVZ_GAME_DIR || '../pvzge_web/docs');
 const output = path.resolve(process.env.PVZ_BROWSER_OUTPUT || 'work/browser-results');
+const port=Number(process.env.PVZ_PORT || 8765);
+const origin='http://127.0.0.1:'+port;
 fs.mkdirSync(output, {recursive:true});
 const direct = fs.readFileSync('app/src/main/assets/android-direct-touch.js','utf8');
 const input = fs.readFileSync('app/src/main/assets/android-input.js','utf8');
@@ -15,11 +17,27 @@ const types = {'.js':'application/javascript','.json':'application/json','.html'
 const server=http.createServer((req,res)=>{
   const url=new URL(req.url,'http://localhost');
   const rel=decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname);
+  if(rel==='/favicon.ico'){res.writeHead(204);res.end();return;}
   const file=path.resolve(root,'.'+rel);
   if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){
     res.writeHead(404);res.end();return;
   }
   res.setHeader('Content-Type',types[path.extname(file)]||'application/octet-stream');
+  if(rel==='/index.html' && process.env.PVZ_SERVE_CLIENT==='1') {
+    const hooks=direct+'\n'+input+`\nwindow.render_game_to_text=function(){
+      return JSON.stringify({coordinates:'CSS pixels, origin top left',touch:PvzDirectTouch.state(),contacts:PvzInput.state(),
+        scene:window.System&&System.get(System.resolve('cc'))?.director.getScene()?.name});};
+      var boot=setInterval(function(){
+        var K=window.System&&System.get('chunks:///_virtual/KeyListener.ts')?.KeyListener;
+        if(!K?.cp)return;
+        var buttons=[...document.querySelectorAll('button')].filter(b=>b.getClientRects().length);
+        if(buttons.length===1&&buttons[0].textContent.trim()==='')buttons[0].click();
+        if(System.get(System.resolve('cc')).director.getScene()?.name==='mainScene'){
+          clearInterval(boot);K.goToLevel(['tutorial1'],[],false,false).catch(console.error);
+        }
+      },500);`;
+    res.end(fs.readFileSync(file,'utf8').replace('</head>','<script>'+hooks+'</script></head>'));return;
+  }
   if(rel==='/application.js') {
     const s=fs.readFileSync(file,'utf8');
     if(!/\bcc\s*=\s*engine\s*;/.test(s))throw Error('Unknown bootstrap');
@@ -29,9 +47,10 @@ const server=http.createServer((req,res)=>{
   fs.createReadStream(file).pipe(res);
 });
 (async()=>{
-  await new Promise(resolve=>server.listen(8765,'127.0.0.1',resolve));
+  await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
+  if(process.env.PVZ_SERVE_CLIENT==='1'){console.log('Interactive test game: '+origin);return;}
   const browser=await chromium.launch({executablePath:process.env.PVZ_CHROME || '/usr/bin/google-chrome',
-    args:['--no-sandbox','--enable-unsafe-swiftshader','--use-angle=swiftshader']});
+    args:process.env.PVZ_GPU==='hardware'?['--no-sandbox']:['--no-sandbox','--enable-unsafe-swiftshader','--use-angle=swiftshader']});
   const context=await browser.newContext({viewport:{width:1280,height:800},deviceScaleFactor:2,hasTouch:true,isMobile:true});
   const page=await context.newPage();
   const logs=[];
@@ -41,9 +60,9 @@ const server=http.createServer((req,res)=>{
     exportData:(data,name)=>window.__nativeExports.push({data,name}),
     exportError:()=>{throw Error('Native export failed');}};`+exporting+'\n'+direct+'\n'+input);
   // Avoid unrelated third-party analytics/ad requests in the isolated test profile.
-  await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:8765/') ? route.continue():route.abort());
+  await page.route('**/*',route=>route.request().url().startsWith(origin+'/') ? route.continue():route.abort());
   try {
-    await page.goto('http://127.0.0.1:8765/',{waitUntil:'domcontentloaded'});
+    await page.goto(origin+'/',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>window.System&&System.get('chunks:///_virtual/KeyListener.ts')?.KeyListener?.cp,null,{timeout:180000});
     await page.waitForTimeout(15000);
     await page.screenshot({path:path.join(output,'01-loaded.png')});
@@ -175,8 +194,9 @@ const server=http.createServer((req,res)=>{
     await page.evaluate(()=>{
       const U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;
       const L=System.get('chunks:///_virtual/levelController.ts').LevelPlay.component;
-      L.Tutorial_Point_At_Grass=false;L.Tutorial_Sun_Stuck=false;L.Tutorial_Wave_Stuck=true;
-      U.cards.addCardByType('sunflower');U.cards.addCardByType('wallnut');
+      Object.keys(L).filter(k=>k.startsWith('Tutorial_')&&typeof L[k]==='boolean').forEach(k=>L[k]=false);
+      L.Tutorial_Sun_Stuck=true;L.Tutorial_Wave_Stuck=true;
+      U.cards.addCardByType('wallnut');U.cards.addCardByType('potatomine');
       for(let i=1;i<3;i++) {U.cards.CFs[i].ca.disallowed=0;U.cards.CUs[i].gameStart();U.cards.cardsUIUpper.push(U.cards.CUs[i]);}
       U.cards.cardsUIUpper.forEach(c=>{c.CD=0;c.coolDown(0);});
       const Sun=System.get('chunks:///_virtual/SunCount.ts').SunCount;
@@ -204,8 +224,11 @@ const server=http.createServer((req,res)=>{
     }
     for(let i=0;i<3;i++)await startFinger(11+i,multi.cards[i].point);
     for(let i=0;i<3;i++)await moveFinger(11+i,multi.cells[i]);
-    const heldThree=await page.evaluate(()=>({touch:PvzDirectTouch.state(),contacts:PvzInput.state()}));
+    await page.waitForTimeout(200);
+    const heldThree=await page.evaluate(()=>({touch:PvzDirectTouch.state(),contacts:PvzInput.state(),
+      previews:System.get('chunks:///_virtual/UI.ts').UIInGame.component.plantInHandLayer.children.length}));
     if(heldThree.touch.fingers!==3||heldThree.contacts.length!==3)throw Error('Three contacts did not remain independently held: '+JSON.stringify(heldThree));
+    if(heldThree.previews>1)throw Error('Asynchronous card previews piled up: '+JSON.stringify(heldThree));
     await page.screenshot({path:path.join(output,'06-three-fingers-held.png')});
     await endFinger(12);
     const partial=await page.evaluate(()=>({touch:PvzDirectTouch.state(),contacts:PvzInput.state()}));
@@ -246,19 +269,19 @@ const server=http.createServer((req,res)=>{
     }
     // Keep a plant held while another finger independently presses/releases empty lawn.
     await resetCards(500);
-    const plantPoint=await cellPoint(1,0),emptyPoint=await cellPoint(4,8);
+    const plantPoint=await cellPoint(2,3),emptyPoint=await cellPoint(2,8);
     await startFinger(21,multi.cards[0].point);await moveFinger(21,plantPoint);
     await startFinger(22,emptyPoint);await endFinger(22);
-    const afterNeutral=await resultAt([[1,0],[4,8]]);
+    const afterNeutral=await resultAt([[2,3],[2,8]]);
     if(afterNeutral.plants.some(p=>p.length)||afterNeutral.contacts.length!==1)throw Error('Neutral finger stole a held plant: '+JSON.stringify(afterNeutral));
     await page.waitForTimeout(150);
     // Real suns use original production, hit geometry, collect() and SunCount.SunAdd.
     await page.evaluate(()=>{
       const cc=System.get(System.resolve('cc'));
       const S=System.get('chunks:///_virtual/Square.ts').Square;
-      const producer=System.get('chunks:///_virtual/Sunflower.ts').SunflowerProps;
-      const a=S.getLnC(1,0).node.worldPosition,b=S.getLnC(4,8).node.worldPosition;
-      const points=[b,S.getLnC(4,7).node.worldPosition,new cc.Vec2((a.x+b.x)/2,(a.y+b.y)/2)];
+      const producer=System.get('chunks:///_virtual/Sunflower.ts').sunflower;
+      const a=S.getLnC(2,3).node.worldPosition,b=S.getLnC(2,8).node.worldPosition;
+      const points=[b,S.getLnC(2,7).node.worldPosition,new cc.Vec2((a.x+b.x)/2,(a.y+b.y)/2)];
       window.__multiSuns=points.map(p=>producer.produceSun(25,new cc.Vec2(p.x,p.y),0,false)[0]);
       __multiSuns.forEach(s=>{s.gravity=0;s.linearVelocity=new cc.Vec2(0,0);s.bodyLinearVelocity=0;});
     });
@@ -270,14 +293,17 @@ const server=http.createServer((req,res)=>{
     await startFinger(22,pickupPoints[0]);await startFinger(23,pickupPoints[1]);
     await page.waitForTimeout(100);
     const pickupResult=await page.evaluate(()=>({sun:System.get('chunks:///_virtual/SunCount.ts').SunCount.Value,
-      collected:__multiSuns.map(s=>s.collected),contacts:PvzInput.state(),touch:PvzDirectTouch.state()}));
+      collected:__multiSuns.map(s=>s.collected),contacts:PvzInput.state(),touch:PvzDirectTouch.state(),
+      previews:System.get('chunks:///_virtual/UI.ts').UIInGame.component.plantInHandLayer.children.length}));
     if(pickupResult.sun!==550||JSON.stringify(pickupResult.collected)!=='[true,true,false]'||pickupResult.contacts.length!==3)
       throw Error('Independent pickup failed or a phantom line collected the midpoint sun: '+JSON.stringify(pickupResult));
+    if(pickupResult.previews>1)throw Error('Pickup switching duplicated the planting preview');
     await page.screenshot({path:path.join(output,'08-plant-and-two-pickup-fingers.png')});
     await endFinger(22);await moveFinger(21,plantPoint);await endFinger(23);await endFinger(21);
-    await page.waitForFunction(()=>System.get('chunks:///_virtual/Square.ts').Square.getLnC(1,0).getAllPlants().length===1,null,{timeout:10000});
-    const plantAndPickup=await resultAt([[1,0],[4,8]]);
+    await page.waitForFunction(()=>System.get('chunks:///_virtual/Square.ts').Square.getLnC(2,3).getAllPlants().length===1,null,{timeout:10000});
+    const plantAndPickup=await resultAt([[2,3],[2,8]]);
     if(plantAndPickup.sun!==450||plantAndPickup.plants[1].length)throw Error('Pickups interfered with held plant cost/target: '+JSON.stringify(plantAndPickup));
+    await page.evaluate(()=>{__multiSuns[2].node.active=false;}); // Remove this scenario's uncollected decoy.
     // One browser touchend event releases both contacts before any next game frame.
     async function pair(cardIndices,targets) {
       for(let i=0;i<2;i++)await startFinger(31+i,multi.cards[cardIndices[i]].point);
@@ -287,13 +313,13 @@ const server=http.createServer((req,res)=>{
       return resultAt(targets);
     }
     await resetCards(500);
-    const sharedCooldown=await pair([0,0],[[0,0],[0,1]]);
+    const sharedCooldown=await pair([0,0],[[2,4],[2,5]]);
     if(sharedCooldown.sun!==400||sharedCooldown.plants.reduce((n,p)=>n+p.length,0)!==1)throw Error('Shared card bypassed its cooldown: '+JSON.stringify(sharedCooldown));
     await resetCards(100);
-    const sharedSun=await pair([0,1],[[0,3],[0,4]]);
+    const sharedSun=await pair([0,1],[[2,5],[2,6]]);
     if(sharedSun.sun!==0||sharedSun.plants.reduce((n,p)=>n+p.length,0)!==1)throw Error('Simultaneous contacts overspent shared sun: '+JSON.stringify(sharedSun));
     await resetCards(500);
-    const sameCell=await pair([0,1],[[0,6],[0,6]]);
+    const sameCell=await pair([0,1],[[2,6],[2,6]]);
     if(sameCell.sun!==400||sameCell.plants.some(p=>p.length!==1))throw Error('Two contacts occupied the same pending cell: '+JSON.stringify(sameCell));
     fs.writeFileSync(path.join(output,'multi-touch-check.json'),JSON.stringify({multi,heldThree,partial,threeResult,
       afterNeutral,pickupResult,plantAndPickup,sharedCooldown,sharedSun,sameCell},null,2));
