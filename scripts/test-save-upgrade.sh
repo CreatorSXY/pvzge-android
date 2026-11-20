@@ -2,6 +2,7 @@
 set -euo pipefail
 mkdir -p work/save-upgrade
 sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+export PATH="$sdk_root/platform-tools:$sdk_root/emulator:$PATH"
 "$sdk_root/cmdline-tools/latest/bin/sdkmanager" 'system-images;android-35;google_apis;x86_64' >/dev/null
 printf 'no\n' | "$sdk_root/cmdline-tools/latest/bin/avdmanager" create avd --force --name pvzge-save --package 'system-images;android-35;google_apis;x86_64' --device pixel_6 >/dev/null
 sudo chown "$(id -u):$(id -g)" /dev/kvm
