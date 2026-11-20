@@ -329,6 +329,39 @@ const server=http.createServer((req,res)=>{
       afterNeutral,pickupResult,plantAndPickup,sharedCooldown,sharedSun,sameCell},null,2));
     await page.screenshot({path:path.join(output,'09-multi-touch-regressions.png')});
     console.log('PASS: held plant + neutral finger + independent pickup, no phantom inter-finger sweep, same-event cooldown/sun/occupancy');
+    // Built-in engine buttons use touch identity too; separate mouse state alone
+    // must not leave one pressed or click the other twice through shared touch 0.
+    await page.evaluate(()=>{
+      const cc=System.get(System.resolve('cc')),U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;
+      const parent=U.s2xButton.node.parent,layout=parent.getComponent(cc.Layout);
+      if(layout)layout.enabled=false;
+      window.__multiButtons=[];window.__multiButtonClicks=[0,0];
+      for(let i=0;i<2;i++){
+        const n=new cc.Node();n.layer=U.s2xButton.node.layer;
+        n.addComponent(cc.UITransform).setContentSize(56,56);
+        n.name='IndependentButton'+i;n.parent=parent;
+        const p=U.s2xButton.node.worldPosition;
+        n.worldPosition=new cc.Vec3(p.x-240+i*80,p.y,0);
+        const button=n.addComponent(cc.Button);button.enabled=true;button.interactable=true;button.clickEvents=[];
+        n.on('click',()=>__multiButtonClicks[i]++);__multiButtons.push(button);
+      }
+    });
+    await page.waitForTimeout(300);
+    const buttonPoints=await page.evaluate(()=>__multiButtons.map(b=>__touchCss(b.node.worldPosition)));
+    if(!await page.evaluate(()=>PvzDirectTouch.state().nativeUI))throw Error('Engine native touch routing unavailable');
+    await startFinger(61,buttonPoints[0]);
+    await startFinger(62,buttonPoints[1]);
+    const buttonsHeld=await page.evaluate(()=>__multiButtons.map(b=>b._pressed));
+    if(JSON.stringify(buttonsHeld)!=='[true,true]')throw Error('Built-in buttons did not remain independently held: '+JSON.stringify(buttonsHeld));
+    await endFinger(62);
+    const buttonSurvivor=await page.evaluate(()=>({pressed:__multiButtons.map(b=>b._pressed),clicks:__multiButtonClicks.slice()}));
+    if(JSON.stringify(buttonSurvivor)!=='{"pressed":[true,false],"clicks":[0,1]}')throw Error('Button release affected its peer or clicked twice: '+JSON.stringify(buttonSurvivor));
+    await endFinger(61);
+    const buttonsDone=await page.evaluate(()=>({pressed:__multiButtons.map(b=>b._pressed),clicks:__multiButtonClicks.slice()}));
+    if(JSON.stringify(buttonsDone)!=='{"pressed":[false,false],"clicks":[1,1]}')throw Error('A built-in button remained pressed or lost its click: '+JSON.stringify(buttonsDone));
+    fs.writeFileSync(path.join(output,'native-ui-check.json'),JSON.stringify({buttonPoints,buttonsHeld,buttonSurvivor,buttonsDone},null,2));
+    await page.screenshot({path:path.join(output,'10-independent-ui-buttons.png')});
+    console.log('PASS: built-in UI buttons preserve independent native touch IDs and emit one click each');
     if(logs.some(l=>l.type==='pageerror'))throw Error('Game reported a JavaScript error: '+JSON.stringify(logs));
     fs.writeFileSync(path.join(output,'state.json'),JSON.stringify({before,info,selected,after,dragInfo,preview,dragAfter},null,2));
     console.log('PASS: first lawn tap planted using real game API',JSON.stringify(after));

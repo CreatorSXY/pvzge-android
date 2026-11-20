@@ -3,6 +3,7 @@
     'use strict';
     if (window.PvzInput) return;
     var contacts = new Map();
+    var nativeId = 1000000; // Keep routed touches distinct from Cocos' physical-mouse touch 0.
     var slop = 12;
     function point(t) { return { x: t.clientX, y: t.clientY }; }
     function bridge() { return window.PvzDirectTouch; }
@@ -17,6 +18,20 @@
         if (api && api.mouseAction) api.mouseAction(g.mouse, g.last, fn);
         else fn();
     }
+    function touch(g, type) {
+        if (!g.native) return;
+        function asTouch(contact) {
+            return new window.Touch({ identifier: contact.nativeId, target: contact.canvas,
+                clientX: contact.last.x, clientY: contact.last.y,
+                pageX: contact.last.x + (window.scrollX || 0), pageY: contact.last.y + (window.scrollY || 0),
+                screenX: contact.last.x, screenY: contact.last.y, force: contact.mouse.ending ? 0 : 1 });
+        }
+        var active = Array.from(contacts.values()).filter(function (contact) { return contact.native; }).map(asTouch);
+        var event = new window.TouchEvent(type, { view: window, bubbles: true, cancelable: true,
+            touches: active, targetTouches: active, changedTouches: [asTouch(g)] });
+        event.__pvzForwarded = true;
+        g.canvas.dispatchEvent(event);
+    }
     function sync() {
         var api = bridge();
         if (api && api.setContacts) api.setContacts(Array.from(contacts.values()).map(function (g) {
@@ -30,14 +45,25 @@
             else api.end(g.direct, g.last, g.moved);
         } else if (g.down) {
             if (g.mouse) g.mouse.ending = true;
+            var delivered = false;
             scoped(g, function () {
+                delivered = true;
                 mouse(g, 'mousemove', 0, 1); mouse(g, 'mouseup', 0, 0);
+                touch(g, cancelled ? 'touchcancel' : 'touchend');
                 if (!cancelled) mouse(g, 'click', 0, 0);
             });
+            // A scene change suppresses stale mouse callbacks, but the engine must
+            // still release the routed touch ID rather than exhausting its touch pool.
+            if (!delivered && g.native) {
+                var cancelTouch = function () { touch(g, 'touchcancel'); };
+                if (api && api.nativeAction) api.nativeAction(g.mouse, cancelTouch);
+                else cancelTouch();
+            }
             g.down = false;
         }
     }
     function handle(e) {
+        if (e.__pvzForwarded) return;
         var canvas = document.getElementById('GameCanvas');
         var changed = Array.from(e.changedTouches);
         var owned = changed.filter(function (t) {
@@ -57,7 +83,9 @@
                 g.direct = api && api.begin(g.last, id);
                 if (!g.direct) {
                     g.mouse = api && api.mouseToken ? api.mouseToken(id) : null;
-                    scoped(g, function () { mouse(g, 'mousemove', 0, 0); mouse(g, 'mousedown', 0, 1); });
+                    g.native = !!(g.mouse && g.mouse.nativeTouch);
+                    if (g.native) g.nativeId = nativeId++;
+                    scoped(g, function () { mouse(g, 'mousemove', 0, 0); mouse(g, 'mousedown', 0, 1); touch(g, 'touchstart'); });
                     g.down = true;
                 }
             } else if (g) {
@@ -65,7 +93,7 @@
                 if (Math.hypot(g.last.x - g.start.x, g.last.y - g.start.y) > slop) g.moved = true;
                 if (e.type === 'touchmove') {
                     if (g.direct) bridge().move(g.direct, g.last);
-                    else scoped(g, function () { mouse(g, 'mousemove', 0, 1); });
+                    else scoped(g, function () { mouse(g, 'mousemove', 0, 1); touch(g, 'touchmove'); });
                 } else {
                     contacts.delete(id);
                     finish(g, e.type === 'touchcancel');

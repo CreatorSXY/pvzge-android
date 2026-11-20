@@ -235,6 +235,27 @@
         };
         Type.prototype.__pvzPreviewInstalled = true;
     }
+    function nativeTouchSupported() {
+        return !!(engine && engine.input && typeof engine.input._simulateEventTouch === 'function' &&
+            typeof window.Touch === 'function' && typeof window.TouchEvent === 'function');
+    }
+    function mouseDispatch(token, fn) {
+        var input = engine && engine.input;
+        if (!input) return fn();
+        var immediate = input._dispatchImmediately, simulate = input._simulateEventTouch;
+        var moving = input._needSimulateTouchMoveEvent;
+        try {
+            input._dispatchImmediately = true;
+            // Real, separately identified touch events already drive built-in UI controls.
+            // Keep mouse-only game callbacks, but do not generate another shared touch 0.
+            if (token && token.nativeTouch) input._simulateEventTouch = function () {};
+            return fn();
+        } finally {
+            input._dispatchImmediately = immediate;
+            input._simulateEventTouch = simulate;
+            input._needSimulateTouchMoveEvent = moving;
+        }
+    }
     var api = {
         installEngine: function (cc) {
             engine = cc;
@@ -361,7 +382,7 @@
             var tool = armedTool && armedTool.ui === ui ? armedTool.selection : null;
             var value = ui && Object.assign({}, tool || snapshot(ui));
             if (value && held.size && !tool) { value.index = -1; value.currentCF = null; value.willCostSun = 0; }
-            var token = { id: id, ui: ui, selection: value, down: false, first: true };
+            var token = { id: id, ui: ui, selection: value, down: false, first: true, nativeTouch: nativeTouchSupported() };
             mice.set(id, token); return token;
         },
         mouseAction: function (token, p, fn) {
@@ -370,31 +391,32 @@
                 if (token.ending) mice.delete(token.id);
                 else mouseForeground = token;
             }
-            var ui = refs.UIInGame && refs.UIInGame.component;
-            if (!token || !usable(ui)) { if (!token || token.ui === ui) fn(); return; }
-            if (token.ui !== ui) return;
-            var down = ui.mouseDown, cool = ui.MouseClickCoolingDown, listen = ui.MouseListenOffThisTick;
-            var immediate = engine.input && engine.input._dispatchImmediately;
-            try {
-                if (engine.input) engine.input._dispatchImmediately = true;
-                apply(ui, token.selection); ui.mouseDown = token.down;
-                if (token.first) { ui.MouseClickCoolingDown = 0; ui.MouseListenOffThisTick = false; token.first = false; }
-                locate(ui, p); fn(); token.selection = snapshot(ui); token.down = ui.mouseDown;
-                if (!held.size) armed = selected(ui) ? tokenFor(ui, token.selection, p, false, token.id) : null;
-                if (ui.index < -1) { armedTool = { ui: ui, selection: token.selection, last: p }; armed = null; }
-                else if (!held.size) armedTool = null;
-            } finally {
-                ui.mouseDown = down; ui.MouseClickCoolingDown = cool; ui.MouseListenOffThisTick = listen;
-                if (engine.input) engine.input._dispatchImmediately = immediate;
-                if (held.size || valid(armed)) restore(ui);
-                else if (!restoreMouse(ui)) ui.mouseDown = false;
-            }
+            return mouseDispatch(token, function () {
+                var ui = refs.UIInGame && refs.UIInGame.component;
+                if (!token || !usable(ui)) { if (!token || token.ui === ui) fn(); return; }
+                if (token.ui !== ui) return;
+                var down = ui.mouseDown, cool = ui.MouseClickCoolingDown, listen = ui.MouseListenOffThisTick;
+                try {
+                    apply(ui, token.selection); ui.mouseDown = token.down;
+                    if (token.first) { ui.MouseClickCoolingDown = 0; ui.MouseListenOffThisTick = false; token.first = false; }
+                    locate(ui, p); fn(); token.selection = snapshot(ui); token.down = ui.mouseDown;
+                    if (!held.size) armed = selected(ui) ? tokenFor(ui, token.selection, p, false, token.id) : null;
+                    if (ui.index < -1) { armedTool = { ui: ui, selection: token.selection, last: p }; armed = null; }
+                    else if (!held.size) armedTool = null;
+                } finally {
+                    ui.mouseDown = down; ui.MouseClickCoolingDown = cool; ui.MouseListenOffThisTick = listen;
+                    if (held.size || valid(armed)) restore(ui);
+                    else if (!restoreMouse(ui)) ui.mouseDown = false;
+                }
+            });
         },
+        nativeAction: function (token, fn) { return mouseDispatch(token, fn); },
         state: function () {
             var ui = refs.UIInGame && refs.UIInGame.component;
             return { ready: usable(ui), selected: ui ? ui.index : null,
                 row: refs.Mouse ? refs.Mouse.mouseInL : null,
-                column: refs.Mouse ? refs.Mouse.mouseInC : null, fingers: held.size, contacts: contacts.size };
+                column: refs.Mouse ? refs.Mouse.mouseInC : null, fingers: held.size, contacts: contacts.size,
+                nativeUI: nativeTouchSupported() };
         }
     };
     window.PvzDirectTouch = api;

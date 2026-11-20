@@ -58,9 +58,9 @@ jobs:
           Path('build-source.json').write_text(json.dumps(source, indent=2))
           Path('release-notes.md').write_text(
               'Game version: ' + game + '\n\n'
-              'Direct touch planting: tap a card then tap a lawn cell, or drag a card and release to plant.\n\n'
-              'Verified in the official game with browser touch input: first-tap planting, drag preview, release-to-plant, original sun cost, and zero synthetic mouse presses for planting. Android compilation and lint passed. Samsung Tab S10+ verification remains pending.\n\n'
-              'Full-resolution rendering is retained. Other controls retain the existing adapter.\n\n'
+              'Independent multi-contact input: drag separate cards with separate fingers; ending one contact preserves surviving contacts. Tap-card then tap-lawn uses the latest tapped card. Two fingers no longer imply right-click or scroll.\n\n'
+              'Verified in the official game with browser touch input: first-tap planting, three different simultaneous card drags, independent pickup while a plant is held, shared resource guards, and two built-in UI buttons with exactly one click each. Android compilation/lint and signed 20004 upgrade/export checks passed. Samsung Tab S10+ verification remains pending.\n\n'
+              'Full-resolution rendering is retained. The game draws one primary planting preview and shares sun/cooldowns/occupancy. Special minigames with their own shared drag objects remain unverified.\n\n'
               'Built and tested in ' + run['html_url'] + '. This release publishes that exact APK without rebuilding.\n\n'
               'Save protection: before opening the game after an upgrade, create and verify a private snapshot, then require an all-player JSON export to a location outside the app. The exported document is read back and checked before continuing. Existing installed game resources are retained.\n\n'
               'The game export button now handles Blob downloads, including immediate URL revocation. Back → Export all players provides a native export path.\n\n'
