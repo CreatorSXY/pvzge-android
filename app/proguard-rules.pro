@@ -6,3 +6,6 @@
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
+
+# Stable snapshot verifier for recovery tools and signed upgrade instrumentation.
+-keep class com.pvzge.gardendless.SaveSnapshot { *; }

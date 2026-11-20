@@ -42,4 +42,14 @@
     <string name="performance_balanced">Balanced · 60 FPS target · reduced resolution</string>
     <string name="performance_original">Full resolution · 60 FPS target · sharper on tablets</string>
     <string name="performance_apply">Apply</string>
+    <string name="save_protection_title">Protect your existing save</string>
+    <string name="save_snapshot_working">Creating and verifying a local snapshot before opening game storage…</string>
+    <string name="save_snapshot_failed">The local snapshot could not be completed. The game has not been opened and its files have not been replaced. Check free space and retry.</string>
+    <string name="save_protection_message">A local snapshot has been verified. Next, export all players to a JSON file in a location you choose. The game will stay closed until the exported file has been read back and verified. Existing game resources will be kept.</string>
+    <string name="save_export_all">Export all players (.json)</string>
+    <string name="save_continue_existing">Continue with existing game files</string>
+    <string name="save_protection_verified">Your JSON save was written and read back successfully. You can now continue with the existing game files. Keep the exported file somewhere safe.</string>
+    <string name="save_not_found">No readable player save was found. No new save has been created. Keep the app installed so the local snapshot can be checked.</string>
+    <string name="game_menu">Game menu</string>
+    <string name="save_choose_external">Choose a folder outside the game, such as Downloads or Documents. The game files folder is not an independent backup.</string>
 </resources>

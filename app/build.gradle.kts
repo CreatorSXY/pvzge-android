@@ -8,6 +8,7 @@ plugins {
 android {
     namespace = "com.pvzge.gardendless"
     compileSdk = 35
+    testBuildType = "release"
 
     signingConfigs {
         create("release") {
@@ -32,6 +33,7 @@ android {
         applicationId = "com.pvzge.gardendless"
         minSdk = 27
         targetSdk = 35
+        testInstrumentationRunner = "com.pvzge.gardendless.SaveProtectionInstrumentation"
         versionCode = 1
         versionName = "0.10.0"
     }

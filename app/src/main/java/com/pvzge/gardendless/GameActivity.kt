@@ -49,17 +49,23 @@ class GameActivity : AppCompatActivity() {
     private lateinit var performanceScript: String
     private lateinit var inputScript: String
     private lateinit var directTouchScript: String
+    private lateinit var exportScript: String
+    private var protectingSave = false
+    private var saveProtectionStatus: TextView? = null
+    private var saveProtectionContinue: android.widget.Button? = null
     private var performanceDialog: android.app.Dialog? = null
     private var webviewReady = false
     private lateinit var aspectContainer: AspectRatioFrameLayout
     private val prefs by lazy { getSharedPreferences("app_data", MODE_PRIVATE) }
     private val EXPORT_SAVE_RESULT_CODE = 102
     private var pendingExport: ByteArray? = null
+    private var exportWriting = false
     @Volatile private var pendingExportName: String? = null
     private var fullscreenCallback: CustomViewCallback? = null
 
     private companion object {
         const val PREF_FULLSCREEN = "webview_fullscreen"
+        const val APP_URL = "https://appassets.androidplatform.net/index.html"
     }
 
     private lateinit var webView: WebView
@@ -77,23 +83,154 @@ class GameActivity : AppCompatActivity() {
         performanceScript = assets.open("android-performance.js").bufferedReader().use { it.readText() }
         inputScript = assets.open("android-input.js").bufferedReader().use { it.readText() }
         directTouchScript = assets.open("android-direct-touch.js").bufferedReader().use { it.readText() }
+        exportScript = assets.open("android-export.js").bufferedReader().use { it.readText() }
         createNotificationChannel()
 
-        // Pre-warm WebView engine during extraction
-        webView = MouseGameWebView(this)
+        val savedVersion = prefs.getInt("extracted_version", 0)
+        startWithSaveProtection(savedVersion, BuildConfig.VERSION_CODE)
+    }
 
-        val sp = getSharedPreferences("app_data", MODE_PRIVATE)
-        val savedVersion = sp.getInt("extracted_version", 0)
-        val currentVersion = packageManager.getPackageInfo(packageName, 0).versionCode
-
-        if (savedVersion != currentVersion) {
-            if (savedVersion > 0) {
-                showPreUpdateWarning(currentVersion, sp)
-            } else {
-                checkAndExtractAssets(currentVersion, sp)
+    private fun startWithSaveProtection(savedVersion: Int, currentVersion: Int) {
+        if (savedVersion > 0 && prefs.getInt("save_protection_version", 0) != currentVersion) {
+            protectingSave = true
+            val status = TextView(this).apply {
+                text = getString(R.string.save_snapshot_working)
+                setPadding(32, 32, 32, 32)
+            }
+            setContentView(status)
+            // No WebView, game page or database is opened until this read-only snapshot verifies.
+            lifecycleScope.launch {
+                val snapshot = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val directory = File(filesDir, "save-protection")
+                        val previous = prefs.getString("save_snapshot_$currentVersion", null)
+                            ?.let { File(directory, it.substringAfterLast('/')) }
+                        if (previous != null && previous.isFile &&
+                            SaveSnapshot.verify(previous).getProperty("targetVersion") == currentVersion.toString()) previous
+                        else SaveSnapshot.create(File(applicationInfo.dataDir), directory, savedVersion, currentVersion)
+                    }
+                }
+                snapshot.onSuccess { file ->
+                    prefs.edit().putString("save_snapshot_$currentVersion", file.name).commit()
+                    initializeWebView()
+                    showSaveProtection(currentVersion)
+                }.onFailure {
+                    MaterialAlertDialogBuilder(this@GameActivity)
+                        .setTitle(R.string.save_protection_title)
+                        .setMessage(R.string.save_snapshot_failed)
+                        .setPositiveButton(R.string.retry) { _, _ -> startWithSaveProtection(savedVersion, currentVersion) }
+                        .setNegativeButton(R.string.close_app) { _, _ -> finish() }
+                        .setCancelable(false).show()
+                }
             }
         } else {
-            setupWebview()
+            initializeWebView()
+            if (File(filesDir, "pvzge_web/index.html").isFile) setupWebview()
+            else checkAndExtractAssets(currentVersion, prefs)
+        }
+    }
+
+    private fun initializeWebView() {
+        if (!::webView.isInitialized) webView = MouseGameWebView(this)
+    }
+
+    private fun showSaveProtection(currentVersion: Int) {
+        val layout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(40, 32, 40, 32)
+        }
+        val title = TextView(this).apply { text = getString(R.string.save_protection_title); textSize = 24f }
+        val status = TextView(this).apply { text = getString(R.string.save_protection_message); setPadding(0, 20, 0, 20) }
+        val export = android.widget.Button(this).apply {
+            text = getString(R.string.save_export_all)
+            tag = "save-protection-export"
+            isEnabled = false
+            setOnClickListener { exportAllPlayers() }
+        }
+        val continueButton = android.widget.Button(this).apply {
+            text = getString(R.string.save_continue_existing)
+            tag = "save-protection-continue"
+            isEnabled = false
+            setOnClickListener {
+                protectingSave = false
+                // Keep the installed game's files. This wrapper update does not replace them.
+                if (File(filesDir, "pvzge_web/index.html").isFile) setupWebview()
+                else checkAndExtractAssets(currentVersion, prefs)
+            }
+        }
+        saveProtectionStatus = status
+        saveProtectionContinue = continueButton
+        layout.addView(title); layout.addView(status); layout.addView(export); layout.addView(continueButton)
+        // An isolated page at the original origin reads storage without executing any game scripts.
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.visibility = View.INVISIBLE
+        layout.addView(webView, android.widget.LinearLayout.LayoutParams(1, 1))
+        setContentView(layout)
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                export.isEnabled = true
+            }
+        }
+        webView.loadDataWithBaseURL(APP_URL, "<html><body></body></html>", "text/html", null, APP_URL)
+    }
+
+    private fun exportAllPlayers() {
+        if (!::webView.isInitialized || pendingExport != null || exportWriting) return
+        val script = """
+(function() {
+    var module = window.System && System.get('chunks:///_virtual/PlayerProperties.ts');
+    var players = module && module.AllPlayerProperties;
+    if (players && players.allPlayers && players.allPlayers.length) players.savePP();
+    return localStorage.getItem('PvZ2_PlayerProperties');
+})();
+        """.trimIndent()
+        webView.evaluateJavascript(script) { encoded ->
+            runCatching {
+                val raw = org.json.JSONTokener(encoded).nextValue()
+                require(raw is String && raw.length <= 16 * 1024 * 1024)
+                val players = org.json.JSONArray(raw)
+                require(players.length() > 0)
+                val date = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                beginExport(raw.toByteArray(Charsets.UTF_8), "gardendless_all_players_$date.json", "application/json")
+            }.onFailure {
+                Toast.makeText(this, R.string.save_not_found, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun receiveExportData(data: String, name: String) {
+        if ((pendingExport != null || exportWriting)) return
+        runCatching {
+            require(data.length <= 24 * 1024 * 1024 && data.startsWith("data:"))
+            val comma = data.indexOf(',')
+            require(comma > 0)
+            val header = data.substring(5, comma)
+            val bytes = if (header.endsWith(";base64", true)) Base64.decode(data.substring(comma + 1), Base64.DEFAULT)
+                else Uri.decode(data.substring(comma + 1)).toByteArray(Charsets.UTF_8)
+            require(bytes.size <= 16 * 1024 * 1024)
+            val type = header.substringBefore(';').ifBlank { "application/octet-stream" }
+            beginExport(bytes, name, type)
+        }.onFailure {
+            Toast.makeText(this, R.string.export_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun beginExport(bytes: ByteArray, name: String, type: String) {
+        if ((pendingExport != null || exportWriting)) return
+        val cleanName = name.substringAfterLast('/').substringAfterLast('\\')
+            .filter { !it.isISOControl() }.take(150).ifBlank { "gardendless-save.json" }
+        pendingExport = bytes
+        try {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                this.type = type
+                addCategory(Intent.CATEGORY_OPENABLE)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                putExtra(Intent.EXTRA_TITLE, cleanName)
+            }, EXPORT_SAVE_RESULT_CODE)
+        } catch (failure: Exception) {
+            pendingExport = null
+            Toast.makeText(this, R.string.export_failed, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -250,6 +387,9 @@ class GameActivity : AppCompatActivity() {
         // WebView was pre-warmed in onCreate
         // Apply GPU and security settings
 
+        (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+        webView.visibility = View.VISIBLE
+        webView.clearHistory()
         aspectContainer = AspectRatioFrameLayout(this).apply {
             setBackgroundColor(android.graphics.Color.BLACK)
             fullscreen = prefs.getBoolean(PREF_FULLSCREEN, false)
@@ -273,7 +413,7 @@ class GameActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = false
-            allowContentAccess = false
+            allowContentAccess = true // Only user-selected document URIs receive Android read grants.
             mediaPlaybackRequiresUserGesture = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 setAlgorithmicDarkeningAllowed(false)
@@ -296,33 +436,26 @@ class GameActivity : AppCompatActivity() {
             fun setExportName(name: String) {
                 pendingExportName = name.substringAfterLast('/').substringAfterLast('\\')
             }
+
+            @JavascriptInterface
+            fun exportData(data: String, name: String) {
+                if (data.length > 24 * 1024 * 1024) return
+                webView.post {
+                    if (webView.url?.startsWith("https://appassets.androidplatform.net/") == true) receiveExportData(data, name)
+                }
+            }
+
+            @JavascriptInterface
+            fun exportError() {
+                webView.post { Toast.makeText(this@GameActivity, R.string.export_failed, Toast.LENGTH_LONG).show() }
+            }
         }, "GardendlessBridge")
 
-        webView.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-            if (!url.startsWith("data:") || pendingExport != null) return@setDownloadListener
-            try {
-                val comma = url.indexOf(',')
-                require(comma >= 0) { "Invalid data URI" }
-                val payload = url.substring(comma + 1)
-                pendingExport = if (url.substring(0, comma).endsWith(";base64", true)) {
-                    Base64.decode(Uri.decode(payload), Base64.DEFAULT)
-                } else {
-                    Uri.decode(payload).toByteArray(Charsets.UTF_8)
-                }
-                val fallbackType = mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
-                val name = pendingExportName?.takeIf { it.isNotBlank() }
-                    ?: suggestFileName(contentDisposition, fallbackType)
+        webView.setDownloadListener { url, _, disposition, mime, _ ->
+            if (url.startsWith("data:")) {
+                val name = pendingExportName ?: suggestFileName(disposition, mime ?: "application/json")
                 pendingExportName = null
-                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    type = mimeFromExtension(name) ?: fallbackType
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    putExtra(Intent.EXTRA_TITLE, name)
-                }
-                startActivityForResult(intent, EXPORT_SAVE_RESULT_CODE)
-            } catch (e: Exception) {
-                pendingExport = null
-                pendingExportName = null
-                Toast.makeText(this, R.string.export_failed, Toast.LENGTH_SHORT).show()
+                receiveExportData(url, name)
             }
         }
 
@@ -442,7 +575,7 @@ class GameActivity : AppCompatActivity() {
         val html = response.data.bufferedReader().use { it.readText() }
         val head = Regex("<head(?:\\s[^>]*)?>", RegexOption.IGNORE_CASE).find(html)
         val bridgeTag = "<script>window.PvzTargetFps=" + performanceMode.targetFps + ";" +
-            performanceScript + directTouchScript + inputScript + gameBridgeHookJs + "</script>"
+            performanceScript + directTouchScript + inputScript + exportScript + gameBridgeHookJs + "</script>"
         val hookedHtml = if (head != null) {
             html.replaceRange(head.range, head.value + bridgeTag)
         } else {
@@ -550,12 +683,30 @@ class GameActivity : AppCompatActivity() {
                 pendingExport = null
                 val uri = data?.data
                 if (resultCode == RESULT_OK && bytes != null && uri != null) {
+                    if (uri.authority == "$packageName.documents" || uri.authority == "$packageName.fileprovider") {
+                        Toast.makeText(this, R.string.save_choose_external, Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    exportWriting = true
                     lifecycleScope.launch {
                         val ok = withContext(Dispatchers.IO) {
                             runCatching {
-                                contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+                                contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes); it.flush() }
                                     ?: throw java.io.IOException("Cannot open export destination")
+                                val expected = SaveSnapshot.sha256(bytes.inputStream())
+                                val input = contentResolver.openInputStream(uri)
+                                    ?: throw java.io.IOException("Cannot verify exported document")
+                                require(expected == SaveSnapshot.sha256(input)) { "Export read-back differs" }
                             }.isSuccess
+                        }
+                        exportWriting = false
+                        if (ok) {
+                            prefs.edit().putString("last_verified_save_export", uri.toString()).commit()
+                            if (protectingSave) {
+                                prefs.edit().putInt("save_protection_version", BuildConfig.VERSION_CODE).commit()
+                                saveProtectionStatus?.text = getString(R.string.save_protection_verified)
+                                saveProtectionContinue?.isEnabled = true
+                            }
                         }
                         Toast.makeText(this@GameActivity,
                             if (ok) R.string.export_done else R.string.export_failed,
@@ -737,10 +888,14 @@ class GameActivity : AppCompatActivity() {
 
     private fun showExitDialog() {
         MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.hint)
-            .setMessage(R.string.exit_confirm)
-            .setNeutralButton(R.string.performance_title) { _, _ -> showPerformanceSettings() }
-            .setPositiveButton(R.string.yes) { _, _ -> finish() }
+            .setTitle(R.string.game_menu)
+            .setItems(arrayOf(getString(R.string.save_export_all), getString(R.string.performance_title), getString(R.string.yes))) { _, index ->
+                when (index) {
+                    0 -> exportAllPlayers()
+                    1 -> showPerformanceSettings()
+                    2 -> finish()
+                }
+            }
             .setNegativeButton(R.string.no, null)
             .show()
     }

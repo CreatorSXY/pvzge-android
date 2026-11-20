@@ -94,9 +94,10 @@ jobs:
         if: steps.source.outputs.build == 'true'
         run: |
           mkdir -p /tmp/pvzge-tests
-          javac -d /tmp/pvzge-tests app/src/main/java/com/pvzge/gardendless/{UpdateVersion,RenderSize}.java tests/{UpdateVersionTest,RenderSizeTest}.java
+          javac -d /tmp/pvzge-tests app/src/main/java/com/pvzge/gardendless/{UpdateVersion,RenderSize,SaveSnapshot}.java tests/{UpdateVersionTest,RenderSizeTest,SaveSnapshotTest}.java
           java -cp /tmp/pvzge-tests com.pvzge.gardendless.UpdateVersionTest
           java -cp /tmp/pvzge-tests com.pvzge.gardendless.RenderSizeTest
+          java -cp /tmp/pvzge-tests com.pvzge.gardendless.SaveSnapshotTest
       - name: Set Android build version
         id: version
         if: steps.source.outputs.build == 'true'
@@ -117,10 +118,26 @@ jobs:
       - name: Compile, lint and package APK
         if: steps.source.outputs.build == 'true'
         run: |
-          ./gradlew :app:assembleRelease :app:lintRelease --no-daemon || {
+          ./gradlew :app:assembleRelease :app:assembleReleaseAndroidTest :app:lintRelease --no-daemon || {
             cat app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt 2>/dev/null || true
             exit 1
           }
+      - name: Verify signed upgrade from 20004 and native save export
+        if: steps.source.outputs.build == 'true'
+        run: |
+          # These are generated build inputs in this disposable runner, not user data.
+          rm -rf ../pvzge_web/docs app/src/main/assets/pvzge_web.zip
+          docker image prune --all --force
+          bash scripts/test-save-upgrade.sh
+      - name: Save Android upgrade evidence
+        if: always() && steps.source.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-save-upgrade-results
+          path: |
+            work/save-upgrade/*.txt
+            work/save-upgrade/*.log
+            work/save-upgrade/*.png
       - name: Save review build
         if: steps.source.outputs.build == 'true'
         uses: actions/upload-artifact@v4

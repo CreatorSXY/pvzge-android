@@ -8,6 +8,7 @@ const output = path.resolve(process.env.PVZ_BROWSER_OUTPUT || 'work/browser-resu
 fs.mkdirSync(output, {recursive:true});
 const direct = fs.readFileSync('app/src/main/assets/android-direct-touch.js','utf8');
 const input = fs.readFileSync('app/src/main/assets/android-input.js','utf8');
+const exporting = fs.readFileSync('app/src/main/assets/android-export.js','utf8');
 const types = {'.js':'application/javascript','.json':'application/json','.html':'text/html', '.css':'text/css',
   '.wasm':'application/wasm','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.avif':'image/avif',
   '.ttf':'font/ttf','.woff':'font/woff','.woff2':'font/woff2','.ogg':'audio/ogg','.mp3':'audio/mpeg'};
@@ -36,7 +37,9 @@ const server=http.createServer((req,res)=>{
   const logs=[];
   page.on('pageerror',e=>logs.push({type:'pageerror',text:String(e)}));
   page.on('console',m=>{if(m.type()==='error'||m.type()==='warning')logs.push({type:m.type(),text:m.text()});});
-  await page.addInitScript(direct+'\n'+input);
+  await page.addInitScript(`window.__nativeExports=[];window.GardendlessBridge={
+    exportData:(data,name)=>window.__nativeExports.push({data,name}),
+    exportError:()=>{throw Error('Native export failed');}};`+exporting+'\n'+direct+'\n'+input);
   // Avoid unrelated third-party analytics/ad requests in the isolated test profile.
   await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:8765/') ? route.continue():route.abort());
   try {
@@ -146,6 +149,19 @@ const server=http.createServer((req,res)=>{
       sun:System.get('chunks:///_virtual/SunCount.ts').SunCount.Value,mouseEvents:window.__plantingMouseEvents}));
     if(dragAfter.mouseEvents!==0||dragAfter.sun!==dragInfo.sun-dragInfo.cost)throw Error('Drag bypassed game cost or emitted mouse clicks');
     await page.screenshot({path:path.join(output,'05-drag-planted.png')});
+    const expectedExport=await page.evaluate(()=>{
+      const players=System.get('chunks:///_virtual/PlayerProperties.ts').AllPlayerProperties.allPlayers;
+      System.get('chunks:///_virtual/SettingWindow.ts').createExportElement(players,'android-save-存档');
+      return JSON.stringify(players);
+    });
+    await page.waitForFunction(()=>window.__nativeExports.length===1,null,{timeout:10000});
+    const actualExport=await page.evaluate(()=>{
+      const result=window.__nativeExports[0];
+      const bytes=Uint8Array.from(atob(result.data.split(',')[1]),c=>c.charCodeAt(0));
+      return {name:result.name,players:JSON.stringify(JSON.parse(new TextDecoder().decode(bytes)))};
+    });
+    if(actualExport.players!==expectedExport||actualExport.name!=='android-save-存档.json')throw Error('Real game Blob export did not reach native bridge intact');
+    fs.writeFileSync(path.join(output,'export-check.json'),JSON.stringify({name:actualExport.name,passed:true}));
     if(logs.some(l=>l.type==='pageerror'))throw Error('Game reported a JavaScript error: '+JSON.stringify(logs));
     fs.writeFileSync(path.join(output,'state.json'),JSON.stringify({before,info,selected,after,dragInfo,preview,dragAfter},null,2));
     console.log('PASS: first lawn tap planted using real game API',JSON.stringify(after));
