@@ -2,12 +2,14 @@ package com.pvzge.gardendless;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -40,6 +42,7 @@ public class SaveProtectionInstrumentation extends Instrumentation {
             result.putString("result", "PASS:" + phase);
         } catch (Throwable error) {
             android.util.Log.e("SaveProtectionTest", "FAIL:" + phase, error);
+            captureEvidence("failure");
             StringWriter trace = new StringWriter();
             error.printStackTrace(new PrintWriter(trace));
             result.putString("result", "FAIL:" + phase + ":" + trace);
@@ -98,8 +101,17 @@ public class SaveProtectionInstrumentation extends Instrumentation {
         runOnMainSync(() -> proceed[0] = activity.getWindow().getDecorView().findViewWithTag("save-protection-continue"));
         require(proceed[0] != null && !proceed[0].isEnabled(), "Game allowed before verified external backup");
         runOnMainSync(() -> export[0].performClick());
-        waitUntil(20000, () -> clickSave(getUiAutomation().getRootInActiveWindow()));
-        waitUntil(20000, () -> prefs.getString("last_verified_save_export", null) != null);
+        AccessibilityServiceInfo service = getUiAutomation().getServiceInfo();
+        if (service != null) {
+            service.flags |= AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+            getUiAutomation().setServiceInfo(service);
+        }
+        waitUntil(45000, () -> {
+            if (clickSave(getUiAutomation().getRootInActiveWindow())) return true;
+            for (AccessibilityWindowInfo window : getUiAutomation().getWindows()) if (clickSave(window.getRoot())) return true;
+            return false;
+        });
+        waitUntil(45000, () -> prefs.getString("last_verified_save_export", null) != null);
         Uri uri = Uri.parse(prefs.getString("last_verified_save_export", null));
         require(SAVE.equals(read(context.getContentResolver().openInputStream(uri))), "Export differs from pre-upgrade save");
         require(prefs.getInt("save_protection_version", 0) == version, "Backup not acknowledged");
@@ -107,6 +119,7 @@ public class SaveProtectionInstrumentation extends Instrumentation {
         require(proceed[0].isEnabled(), "Continue not enabled after verified export");
         require(ORIGINAL_GAME.equals(read(new FileInputStream(gameFile()))), "Existing game resources changed");
         android.util.Log.i("SaveProtectionTest", "Verified old save survived signed update, snapshot verified, native JSON export round-tripped, original game files unchanged");
+        captureEvidence("verified");
         runOnMainSync(activity::finish);
     }
     private File gameFile() { return new File(getTargetContext().getFilesDir(), "pvzge_web/index.html"); }
@@ -121,10 +134,45 @@ public class SaveProtectionInstrumentation extends Instrumentation {
     }
     private boolean clickSave(AccessibilityNodeInfo node) {
         if (node == null) return false;
-        if (node.isEnabled() && node.isClickable() && node.getText() != null && "Save".equalsIgnoreCase(node.getText().toString()))
-            return node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        String owner = String.valueOf(node.getPackageName());
+        String id = node.getViewIdResourceName();
+        boolean label = "Save".equalsIgnoreCase(String.valueOf(node.getText())) ||
+            "Save".equalsIgnoreCase(String.valueOf(node.getContentDescription())) || (id != null && id.endsWith(":id/button1"));
+        if (owner.endsWith("documentsui") && node.isEnabled() && label) {
+            AccessibilityNodeInfo button = node;
+            for (int i = 0; button != null && i < 4; i++, button = button.getParent()) {
+                if (button.isEnabled() && button.isClickable() && button.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            }
+        }
         for (int i = 0; i < node.getChildCount(); i++) if (clickSave(node.getChild(i))) return true;
         return false;
+    }
+    private void captureEvidence(String label) {
+        try {
+            File base = getTargetContext().getExternalFilesDir(null);
+            if (base == null) return;
+            File folder = new File(base, "upgrade-evidence");
+            if (!folder.isDirectory() && !folder.mkdirs()) return;
+            android.graphics.Bitmap bitmap = getUiAutomation().takeScreenshot();
+            if (bitmap != null) {
+                try (OutputStream out = new FileOutputStream(new File(folder, label + ".png"))) {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+                } finally { bitmap.recycle(); }
+            }
+            StringBuilder tree = new StringBuilder();
+            for (AccessibilityWindowInfo window : getUiAutomation().getWindows()) describe(window.getRoot(), tree, 0);
+            describe(getUiAutomation().getRootInActiveWindow(), tree, 0);
+            try (OutputStream out = new FileOutputStream(new File(folder, label + "-ui.txt"))) {
+                out.write(tree.toString().getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (Throwable failure) { android.util.Log.w("SaveProtectionTest", "Cannot capture UI evidence", failure); }
+    }
+    private void describe(AccessibilityNodeInfo node, StringBuilder tree, int depth) {
+        if (node == null || depth > 30) return;
+        tree.append(depth).append(' ').append(node.getPackageName()).append(' ').append(node.getViewIdResourceName())
+            .append(" text=").append(node.getText()).append(" description=").append(node.getContentDescription())
+            .append(" clickable=").append(node.isClickable()).append(" enabled=").append(node.isEnabled()).append('\n');
+        for (int i = 0; i < node.getChildCount(); i++) describe(node.getChild(i), tree, depth + 1);
     }
     private interface Condition { boolean isTrue() throws Exception; }
     private static void waitUntil(long timeout, Condition condition) throws Exception {

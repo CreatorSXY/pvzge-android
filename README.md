@@ -51,7 +51,7 @@ node --test tests/*.test.cjs
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-Tests cover direct planting, first-tap coordinates, drag/release, original cost rules, cancellation, fallback mouse controls, two-finger gestures, frame-rate control and resource validation. The release workflow also boots the official game in a touch-capable browser, verifies actual plant creation and sun deduction for tap and drag scenarios, and saves screenshots/state. They do not establish real-device compatibility. Test planting, dragging, shovel, save import/export, pause/resume and image clarity on Samsung Tab S10+ before treating a release as device-verified.
+Tests cover direct planting, identifier reordering, partial release/cancel, three independent card drags, fresh shared resource checks, disposable-card ownership, asynchronous preview races, surviving fallback holds, frame-rate control and resource validation. The release workflow boots the official game with browser touch input and verifies three different plants, independent sun collection during a held plant, no fictitious sweep between fingers, and same-event cooldown/sun/occupancy guards; screenshots and state are retained. The game still has one primary planting preview and shared resources. Special minigames with their own shared drag object have not been verified as independent multi-pointer controls. These checks do not establish real-device compatibility. Test planting, dragging, shovel, save import/export, pause/resume and image clarity on Samsung Tab S10+ before treating a release as device-verified.
 
 ## Upstream
 

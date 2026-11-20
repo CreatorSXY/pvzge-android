@@ -14,7 +14,14 @@ grep -x 'pvzge-save' work/save-upgrade/avds.txt
 sudo chown "$(id -u):$(id -g)" /dev/kvm
 "$sdk_root/emulator/emulator" -avd pvzge-save -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 3072 -partition-size 4096 >work/save-upgrade/emulator.log 2>&1 &
 emulator_pid=$!
-trap 'timeout 10 adb logcat -d > work/save-upgrade/logcat.txt 2>/dev/null || true; timeout 10 adb emu kill 2>/dev/null || true; kill "$emulator_pid" 2>/dev/null || true; tail -60 work/save-upgrade/emulator.log' EXIT
+cleanup() {
+  timeout 15 adb pull /sdcard/Android/data/com.pvzge.gardendless/files/upgrade-evidence/. work/save-upgrade/ >/dev/null 2>&1 || true
+  timeout 10 adb logcat -d > work/save-upgrade/logcat.txt 2>/dev/null || true
+  timeout 10 adb emu kill 2>/dev/null || true
+  kill "$emulator_pid" 2>/dev/null || true
+  tail -60 work/save-upgrade/emulator.log
+}
+trap cleanup EXIT
 timeout 240 adb wait-for-device
 for i in $(seq 1 120); do
   if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
@@ -43,4 +50,5 @@ adb shell am force-stop com.pvzge.gardendless
 adb install -r "$new_apk"
 adb shell am instrument -w -e phase verify com.pvzge.gardendless.test/com.pvzge.gardendless.SaveProtectionInstrumentation | tee work/save-upgrade/verify.txt
 grep -F 'PASS:verify' work/save-upgrade/verify.txt
-adb exec-out screencap -p >work/save-upgrade/verified.png
+# The instrumentation captures the verified gate before finishing its Activity.
+adb exec-out screencap -p >work/save-upgrade/after-test.png
