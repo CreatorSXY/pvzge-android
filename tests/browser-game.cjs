@@ -309,7 +309,11 @@ const server=http.createServer((req,res)=>{
       for(let i=0;i<2;i++)await startFinger(31+i,multi.cards[cardIndices[i]].point);
       for(let i=0;i<2;i++)await moveFinger(31+i,await cellPoint(...targets[i]));
       await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});fingers.clear();
-      await page.waitForTimeout(200);
+      await page.waitForFunction(targets=>{
+        const S=System.get('chunks:///_virtual/Square.ts').Square;
+        return targets.every(([r,c])=>!S.getLnC(r,c).spawningPromiseCount)&&
+          targets.some(([r,c])=>S.getLnC(r,c).getAllPlants().length>0);
+      },targets,{timeout:20000});
       return resultAt(targets);
     }
     await resetCards(500);
