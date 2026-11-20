@@ -32,6 +32,7 @@ public class WaveProbe extends Instrumentation {
             }catch(Exception e){throw new RuntimeException(e);}});}
             await(240000,()->Boolean.TRUE.equals(js("!!(window.System&&System.get('chunks:///_virtual/KeyListener.ts')?.KeyListener?.cp)")));
             js("window.__waveErrors=[];addEventListener('error',e=>__waveErrors.push(String(e.error?.stack||e.message)));addEventListener('unhandledrejection',e=>__waveErrors.push(String(e.reason?.stack||e.reason)));true");
+            await(180000,()->Boolean.TRUE.equals(js("System.get(System.resolve('cc')).director.getScene()?.name==='mainScene'")));
             Thread.sleep(15000);
             js("document.querySelectorAll('button').forEach(b=>{if(b.getClientRects().length)b.click()});true");
             await(60000,()->Boolean.TRUE.equals(js("!System.get('chunks:///_virtual/KeyListener.ts').KeyListener.screenColorTweening")));

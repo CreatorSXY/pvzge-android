@@ -65,7 +65,9 @@ const server=http.createServer((req,res)=>{
   try {
     await page.goto(origin+'/',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(()=>window.System&&System.get('chunks:///_virtual/KeyListener.ts')?.KeyListener?.cp,null,{timeout:180000});
-    await page.waitForTimeout(15000);
+    // KeyListener is also created in splashScene, before resource loading finishes.
+    await page.waitForFunction(()=>System.get(System.resolve('cc')).director.getScene()?.name==='mainScene',null,{timeout:180000});
+    await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.getClientRects().length),null,{timeout:60000});
     await page.screenshot({path:path.join(output,'01-loaded.png')});
     // Fresh profiles display the official update notes in a DOM modal above the canvas.
     console.log('Visible HTML controls:',JSON.stringify(await page.locator('button').evaluateAll(nodes=>nodes.map(n=>({text:n.textContent.trim(),visible:!!n.getClientRects().length})))));
