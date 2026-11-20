@@ -44,5 +44,5 @@ if [ "$PROBE_LEGACY_RESOURCES" = true ]; then
   adb shell mkdir -p /sdcard/Android/data/com.pvzge.gardendless/files
   adb push "$base/legacy.zip" /sdcard/Android/data/com.pvzge.gardendless/files/legacy.zip
 fi
-adb shell am instrument -w -e baseline "$PROBE_BASELINE" -e legacy_resources "$PROBE_LEGACY_RESOURCES" com.pvzge.waveprobe/com.pvzge.waveprobe.WaveProbe | tee work/wave-results/result.txt
+adb shell am instrument -w -e baseline "$PROBE_BASELINE" -e legacy_resources "$PROBE_LEGACY_RESOURCES" -e expect_freeze "$PROBE_EXPECT_FREEZE" com.pvzge.waveprobe/com.pvzge.waveprobe.WaveProbe | tee work/wave-results/result.txt
 grep -F 'PASS:wave:' work/wave-results/result.txt

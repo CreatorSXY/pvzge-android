@@ -15,9 +15,9 @@ public class WaveProbe extends Instrumentation {
     private Activity activity;
     private WebView web;
     private File folder;
-    private boolean baseline,legacyResources;
+    private boolean baseline,legacyResources,expectFreeze;
     private static final String LEVEL="System.get('chunks:///_virtual/levelController.ts').LevelPlay.component";
-    @Override public void onCreate(Bundle args){super.onCreate(args);baseline=args!=null&&Boolean.parseBoolean(args.getString("baseline","false"));legacyResources=args!=null&&Boolean.parseBoolean(args.getString("legacy_resources","false"));start();}
+    @Override public void onCreate(Bundle args){super.onCreate(args);baseline=args!=null&&Boolean.parseBoolean(args.getString("baseline","false"));legacyResources=args!=null&&Boolean.parseBoolean(args.getString("legacy_resources","false"));expectFreeze=args!=null&&Boolean.parseBoolean(args.getString("expect_freeze","false"));start();}
     @Override public void onStart(){
         Bundle result=new Bundle();int code=Activity.RESULT_OK;
         try{
@@ -44,16 +44,21 @@ public class WaveProbe extends Instrumentation {
             await(90000,()->Boolean.TRUE.equals(js("(()=>{const U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;return U.cards.maxSlotCount>0&&U.cards.CUs.length>=U.cards.maxSlotCount})()")));
             js("(()=>{const L="+LEVEL+";L.carddeck_displayer.sendCardDeck(L.carddeck_displayer.RecommendedCardDecks[0]);L.letsRock();return true})()");
             await(60000,()->Boolean.TRUE.equals(js(""+LEVEL+".gameStarted")));
-            long deadline=System.currentTimeMillis()+120000;int maxWave=0;
+            long deadline=System.currentTimeMillis()+120000;int maxWave=0;boolean reproduced=false,killed=false;
             while(System.currentTimeMillis()<deadline){
                 JSONObject state=(JSONObject)js("(()=>{const L="+LEVEL+",U=System.get('chunks:///_virtual/UI.ts').UIInGame.component;return {wave:L.currentWave,progress:L.levelProgressPercentage,time:L.gamedTime,next:String(L.NextWaveCountdown),damage:String(L.WaveZombieDamageCountdown),threshold:String(L.NextWaveZombieHealthPercentage),health:L.WaveLeftHealth,zombies:System.get('chunks:///_virtual/CharacterManager.ts').ZombiePool.pool().length,started:L.gameStarted,gaming:L.gaming,paused:U.paused,tutorialStuck:L.Tutorial_Wave_Stuck,errors:__waveErrors,fix:window.PvzWaveFix?.state(),ua:navigator.userAgent,baseline:"+baseline+"}})()");
                 append(state.toString());maxWave=Math.max(maxWave,state.getInt("wave"));
+                if(expectFreeze&&state.getDouble("time")>45&&!killed){
+                    js("System.get('chunks:///_virtual/CharacterManager.ts').ZombiePool.pool().forEach(z=>z.playDie(true));true");killed=true;
+                }
+                if(expectFreeze&&state.getDouble("time")>60&&maxWave==1&&state.getDouble("health")==0&&"Infinity".equals(state.getString("damage"))){reproduced=true;break;}
                 if(maxWave>=3)break;
                 Thread.sleep(2500);
             }
             capture("completed");
-            if(maxWave<3)throw new AssertionError("Pirate1 did not reach wave 3; inspect state.jsonl and logcat");
-            result.putString("result","PASS:wave:"+(baseline?"baseline":"adapter"));
+            if(expectFreeze&&!reproduced)throw new AssertionError("Expected legacy freeze was not reproduced");
+            if(!expectFreeze&&maxWave<3)throw new AssertionError("Pirate1 did not reach wave 3; inspect state.jsonl and logcat");
+            result.putString("result",expectFreeze?"PASS:wave:legacy-freeze-reproduced":"PASS:wave:"+(baseline?"baseline":"adapter"));
         }catch(Throwable e){capture("failure");StringWriter out=new StringWriter();e.printStackTrace(new PrintWriter(out));result.putString("result","FAIL:wave:"+out);code=Activity.RESULT_CANCELED;}
         finish(code,result);
     }
