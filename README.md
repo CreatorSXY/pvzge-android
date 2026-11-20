@@ -45,6 +45,10 @@ python3 scripts/game-source.py --validate ../pvzge_web/docs
 ./gradlew assembleDebug
 ```
 
+## Input design
+
+This fork reuses Cocos Creator's built-in multi-touch routing for engine UI. Forwarded contacts receive distinct IDs, while duplicate mouse-to-touch simulation is suppressed only during adapter dispatch. Existing mouse-only game callbacks still run in each contact's saved context. No additional gesture-recognition dependency is needed: recognizing pinch/swipe does not separate the game's shared card selection, placement cursor, sun and cooldown state. Planting and pickups continue to use the original game APIs and rules.
+
 ## Validation
 
 ```sh
