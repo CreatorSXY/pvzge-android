@@ -17,7 +17,7 @@ public class WaveProbe extends Instrumentation {
     private File folder;
     private boolean baseline;
     private static final String LEVEL="System.get('chunks:///_virtual/levelController.ts').LevelPlay.component";
-    @Override public void onCreate(Bundle args){super.onCreate(args);baseline=args!=null&&args.getBoolean("baseline",false);start();}
+    @Override public void onCreate(Bundle args){super.onCreate(args);baseline=args!=null&&Boolean.parseBoolean(args.getString("baseline","false"));start();}
     @Override public void onStart(){
         Bundle result=new Bundle();int code=Activity.RESULT_OK;
         try{
