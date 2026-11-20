@@ -114,6 +114,12 @@ public class SaveProtectionInstrumentation extends Instrumentation {
         waitUntil(45000, () -> prefs.getString("last_verified_save_export", null) != null);
         Uri uri = Uri.parse(prefs.getString("last_verified_save_export", null));
         require(SAVE.equals(read(context.getContentResolver().openInputStream(uri))), "Export differs from pre-upgrade save");
+        // The URI and protection acknowledgement are committed in separate UI-thread steps.
+        // Observing the first preference does not mean the second commit/UI update has finished.
+        waitUntil(45000, () -> {
+            runOnMainSync(() -> proceed[0] = activity.getWindow().getDecorView().findViewWithTag("save-protection-continue"));
+            return prefs.getInt("save_protection_version", 0) == version && proceed[0] != null && proceed[0].isEnabled();
+        });
         require(prefs.getInt("save_protection_version", 0) == version, "Backup not acknowledged");
         runOnMainSync(() -> proceed[0] = activity.getWindow().getDecorView().findViewWithTag("save-protection-continue"));
         require(proceed[0].isEnabled(), "Continue not enabled after verified export");
