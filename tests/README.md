@@ -44,3 +44,11 @@ On a low-end device, compare the same saved level and wave in Original and Low-e
 - Run on Android 8.1–12 to verify the Android 13 darkening API is not invoked.
 
 The automated checks cover frame-rate control and render sizing, not real GPU throughput or Android touch dispatch. Device performance and Android compilation remain unverified in this workspace.
+
+## Retained legacy wave regression
+
+`node --test tests/wave-fix.test.cjs` covers empty RTID lookups, an entirely empty wave, delayed/failed original spawn actions, flag/cowboy/kill-all rules, modern/unknown controller preservation and interaction with the touch bootstrap.
+
+The `probe-wave.yml` workflow runs an existing tested APK in a disposable Android emulator; it does not rebuild or publish that APK. Select its successful build run with `apk_run`. Setting `legacy_resources=true` loads the original 0.16.6 game files as a test fixture, modeling the save-protection path that retains old installed resources. With the unpatched 20020 build, `expect_freeze=true` requires the first zombie's removal to leave wave 1 blocked by an infinite timer. With a fixed build, leave `expect_freeze=false` and require progression to wave 3. State, errors, compatibility flags and screenshots are retained in `android-wave-results`.
+
+The fixture's protection acknowledgement is set only inside this new emulator to avoid testing the export UI twice. It does not relax the product's snapshot/export gate or access a user's device. The normal release workflow separately verifies that gate with an actual signed upgrade from 20004.
