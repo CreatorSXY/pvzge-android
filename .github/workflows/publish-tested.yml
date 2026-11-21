@@ -72,9 +72,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --draft --target "$SOURCE_SHA" --title "Gardendless Android $RELEASE_VERSION" \
-            --notes-file release-notes.md app-release.apk app-release.apk.sha256 build-source.json
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > existing-releases.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          tag = 'v' + os.environ['RELEASE_VERSION']
+          existing = next((r for r in json.load(open('existing-releases.json')) if r['tag_name'] == tag), None)
+          if existing:
+              assert existing['draft'], 'Refusing to replace files in a public release'
+              assert existing['target_commitish'] == os.environ['SOURCE_SHA'], 'Existing draft has a different source'
+              Path('reuse-draft').write_text(tag)
+          PY
+          if [ -f reuse-draft ]; then
+            # Retry attachment of this exact tested binary without changing owner-authored notes.
+            gh release upload "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --clobber \
+              app-release.apk app-release.apk.sha256 build-source.json
+          else
+            gh release create "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
+              --draft --target "$SOURCE_SHA" --title "Gardendless Android $RELEASE_VERSION" \
+              --notes-file release-notes.md app-release.apk app-release.apk.sha256 build-source.json
+          fi
       - name: Publish approved draft
         if: inputs.publish
         env:
