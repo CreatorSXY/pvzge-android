@@ -96,3 +96,51 @@ test('HTML controls keep native touch events; adapter installation is idempotent
   vm.runInNewContext(script, s.context);
   assert.equal(s.listeners.touchstart, handler);
 });
+
+test('puzzle chord right-clicks the first slot once after both fingers lift', () => {
+  const s = setup(), slot = [100, 100, 10], modifier = [200, 100, 20];
+  s.context.PvzDirectTouch = {
+    begin() {},
+    specialGesture: p => p.x === 100 && { kind: 'puzzle' },
+    specialGestureActive: () => true,
+    nativeAction: (_token, dispatch) => dispatch()
+  };
+  s.touch('touchstart', [slot], [slot]);
+  s.touch('touchstart', [modifier, slot], [modifier]);
+  s.touch('touchend', [modifier], [slot]);
+  assert.deepEqual(s.events, []);
+  s.touch('touchend', [], [modifier]);
+  assert.deepEqual(s.events.filter(e => /mouse(down|up)/.test(e.type))
+    .map(e => [e.type, e.button, e.clientX, e.clientY]),
+  [['mousedown', 2, 100, 100], ['mouseup', 2, 100, 100]]);
+  assert.equal(s.context.PvzInput.state().length, 0);
+});
+
+test('a puzzle tap remains a left click and interrupted chords do not clear slots', () => {
+  const slot = [100, 100, 10], modifier = [200, 100, 20];
+  for (const interruption of ['move', 'cancel', 'third finger', 'scene change']) {
+    const s = setup();
+    let active = true;
+    s.context.PvzDirectTouch = {
+      begin() {},
+      specialGesture: () => ({ kind: 'puzzle' }),
+      specialGestureActive: () => active,
+      nativeAction: (_token, dispatch) => dispatch()
+    };
+    s.touch('touchstart', [slot], [slot]);
+    s.touch('touchend', [], [slot]);
+    assert.deepEqual(s.planted, [[100, 100]]);
+    s.events.length = 0;
+    s.touch('touchstart', [slot], [slot]);
+    s.touch('touchstart', [slot, modifier], [modifier]);
+    const third = [300, 100, 30];
+    const moved = [240, 100, 20];
+    if (interruption === 'move') s.touch('touchmove', [slot, moved], [moved]);
+    if (interruption === 'cancel') s.touch('touchcancel', [modifier], [slot]);
+    if (interruption === 'third finger') s.touch('touchstart', [slot, modifier, third], [third]);
+    if (interruption === 'scene change') active = false;
+    s.touch('touchend', [], [slot, modifier, third]);
+    assert.deepEqual(s.events, [], interruption);
+    assert.equal(s.context.PvzInput.state().length, 0);
+  }
+});

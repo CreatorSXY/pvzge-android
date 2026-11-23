@@ -5,6 +5,7 @@
     var contacts = new Map();
     var nativeId = 1000000; // Keep routed touches distinct from Cocos' physical-mouse touch 0.
     var slop = 12;
+    var pair = null;
     function point(t) { return { x: t.clientX, y: t.clientY }; }
     function bridge() { return window.PvzDirectTouch; }
     function mouse(g, type, button, buttons) {
@@ -34,9 +35,21 @@
     }
     function sync() {
         var api = bridge();
-        if (api && api.setContacts) api.setContacts(Array.from(contacts.values()).map(function (g) {
+        if (api && api.setContacts) api.setContacts(Array.from(contacts.values()).filter(function (g) {
+            return !pair && !g.pending;
+        }).map(function (g) {
             return { id: g.id, x: g.last.x, y: g.last.y };
         }));
+    }
+    function begin(g) {
+        var api = bridge();
+        g.direct = api && api.begin(g.last, g.id);
+        if (g.direct) return;
+        g.mouse = api && api.mouseToken ? api.mouseToken(g.id) : null;
+        g.native = !!(g.mouse && g.mouse.nativeTouch);
+        if (g.native) g.nativeId = nativeId++;
+        scoped(g, function () { mouse(g, 'mousemove', 0, 0); mouse(g, 'mousedown', 0, 1); touch(g, 'touchstart'); });
+        g.down = true;
     }
     function finish(g, cancelled) {
         var api = bridge();
@@ -62,6 +75,39 @@
             g.down = false;
         }
     }
+    function midpoint(first, second) {
+        return { x: (first.last.x + second.last.x) / 2, y: (first.last.y + second.last.y) / 2 };
+    }
+    function updatePair(type) {
+        var api = bridge(), scope = pair.first.pending;
+        if (type === 'touchcancel' || !api.specialGestureActive(scope)) pair.cancelled = true;
+        if (!pair.cancelled && scope.kind === 'puzzle') {
+            if (pair.first.moved || pair.second.moved) pair.cancelled = true;
+            if (!pair.cancelled && !contacts.size) {
+                var first = pair.first;
+                // The first finger targets the slot; the second acts as a modifier.
+                first.last = first.start;
+                api.nativeAction({ nativeTouch: true }, function () {
+                    mouse(first, 'mousemove', 0, 0);
+                    mouse(first, 'mousedown', 2, 2);
+                    mouse(first, 'mouseup', 2, 0);
+                });
+            }
+        } else if (!pair.cancelled && type === 'touchmove' &&
+            contacts.has(pair.first.id) && contacts.has(pair.second.id)) {
+            var center = midpoint(pair.first, pair.second);
+            var dx = Math.abs(center.x - pair.origin.x), dy = Math.abs(center.y - pair.origin.y);
+            if (scope.kind === 'worlds' && !pair.swiped && dx >= 36 && dx > dy) {
+                api.swipeSpecial(scope, pair.origin, center);
+                pair.swiped = true;
+            } else if (scope.kind === 'settings' && (pair.swiped || dy >= slop && dy > dx)) {
+                api.swipeSpecial(scope, pair.last, center);
+                pair.last = center;
+                pair.swiped = true;
+            }
+        }
+        if (!contacts.size) pair = null;
+    }
     function handle(e) {
         if (e.__pvzForwarded) return;
         var canvas = document.getElementById('GameCanvas');
@@ -77,20 +123,38 @@
             var id = t.identifier, g = contacts.get(id);
             if (e.type === 'touchstart') {
                 if (g) return;
+                var previous = contacts.size === 1 && contacts.values().next().value;
                 g = { id: id, canvas: canvas, last: point(t), start: point(t), moved: false, down: false };
                 contacts.set(id, g);
-                var api = bridge();
-                g.direct = api && api.begin(g.last, id);
-                if (!g.direct) {
-                    g.mouse = api && api.mouseToken ? api.mouseToken(id) : null;
-                    g.native = !!(g.mouse && g.mouse.nativeTouch);
-                    if (g.native) g.nativeId = nativeId++;
-                    scoped(g, function () { mouse(g, 'mousemove', 0, 0); mouse(g, 'mousedown', 0, 1); touch(g, 'touchstart'); });
-                    g.down = true;
+                if (pair) { pair.cancelled = true; return; }
+                if (previous && previous.pending) {
+                    var origin = midpoint(previous, g);
+                    pair = { first: previous, second: g, origin: origin, last: origin, swiped: false, cancelled: false };
+                    return;
                 }
+                var api = bridge();
+                // Defer the first press only where a second finger can turn it into a gesture.
+                g.pending = contacts.size === 1 && api && api.specialGesture && api.specialGesture(g.start);
+                if (!g.pending) begin(g);
             } else if (g) {
                 g.last = point(t);
                 if (Math.hypot(g.last.x - g.start.x, g.last.y - g.start.y) > slop) g.moved = true;
+                if (pair) {
+                    if (e.type !== 'touchmove') contacts.delete(id);
+                    return;
+                }
+                if (g.pending) {
+                    if (e.type === 'touchcancel' || !bridge().specialGestureActive(g.pending)) {
+                        contacts.delete(id);
+                        return;
+                    }
+                    if (e.type === 'touchmove' && !g.moved) return;
+                    var last = g.last;
+                    g.last = g.start;
+                    g.pending = null;
+                    begin(g);
+                    g.last = last;
+                }
                 if (e.type === 'touchmove') {
                     if (g.direct) bridge().move(g.direct, g.last);
                     else scoped(g, function () { mouse(g, 'mousemove', 0, 1); touch(g, 'touchmove'); });
@@ -100,6 +164,7 @@
                 }
             }
         });
+        if (pair) updatePair(e.type);
         sync();
     }
     ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (type) {
@@ -107,6 +172,7 @@
     });
     function cancel() {
         var old = Array.from(contacts.values()); contacts.clear();
+        pair = null;
         old.forEach(function (g) { finish(g, true); }); sync();
     }
     window.addEventListener('blur', cancel);

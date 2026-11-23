@@ -367,6 +367,88 @@ const server=http.createServer((req,res)=>{
     fs.writeFileSync(path.join(output,'native-ui-check.json'),JSON.stringify({buttonPoints,buttonsHeld,buttonSurvivor,buttonsDone},null,2));
     await page.screenshot({path:path.join(output,'10-independent-ui-buttons.png')});
     console.log('PASS: built-in UI buttons preserve independent native touch IDs and emit one click each');
+
+    await page.evaluate(()=>{
+      window.__gameExport=(file,name=file)=>System.get('chunks:///_virtual/'+file+'.ts')[name];
+      window.__activeGameComponent=name=>System.get(System.resolve('cc')).director.getScene()
+        .getComponentsInChildren(__gameExport(name)).find(c=>c.enabledInHierarchy);
+      __gameExport('KeyListener').GoToWorldmap();
+    });
+    await page.waitForFunction(()=>{
+      const map=__gameExport('worldMapScene').component;
+      return map?.node.activeInHierarchy && !map.isBusy();
+    },null,{timeout:90000});
+    await page.evaluate(()=>{
+      const map=__gameExport('worldMapScene').component;
+      map.switchWM(__gameExport('PlayerProperties','WorldMapSceneDisplayEnum').chooser);
+    });
+    await page.waitForFunction(()=>{
+      const chooser=__activeGameComponent('WorldMapChooser');
+      return chooser?.icons.length>1 && !chooser.entering;
+    },null,{timeout:90000});
+    async function twoFingerSwipe(point, dx, dy) {
+      await startFinger(71,point);
+      await startFinger(72,{x:point.x+50,y:point.y});
+      fingers.set(71,{x:point.x+dx,y:point.y+dy,id:71});
+      fingers.set(72,{x:point.x+50+dx,y:point.y+dy,id:72});
+      await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[...fingers.values()]});
+      await endFinger(72);
+      await endFinger(71);
+    }
+    const worldPoint=await page.evaluate(()=>{
+      const chooser=__activeGameComponent('WorldMapChooser');
+      chooser.moveTo(0);
+      return __touchCss(chooser.wheelListener.worldPosition);
+    });
+    const worldIndex=()=>page.evaluate(()=>__activeGameComponent('WorldMapChooser').currentI);
+    await twoFingerSwipe(worldPoint,0,-100);
+    if(await worldIndex()!==0)throw Error('Vertical swipe changed worlds');
+    await twoFingerSwipe(worldPoint,-100,0);
+    if(await worldIndex()!==1)throw Error('Two-finger swipe left did not advance one world');
+    await twoFingerSwipe(worldPoint,100,0);
+    if(await worldIndex()!==0)throw Error('Two-finger swipe right did not return to the previous world');
+
+    await page.evaluate(()=>__gameExport('worldMapScene').component.setting());
+    await page.waitForFunction(()=>__activeGameComponent('SettingWindow')?.scrollView?.getMaxScrollOffset().y>0,null,{timeout:30000});
+    const settingsPoint=await page.evaluate(()=>__touchCss(__activeGameComponent('SettingWindow').scrollView.node.worldPosition));
+    const scrollOffset=()=>page.evaluate(()=>__activeGameComponent('SettingWindow').scrollView.getScrollOffset().y);
+    const beforeScroll=await scrollOffset();
+    await twoFingerSwipe(settingsPoint,-100,0);
+    if(Math.abs(await scrollOffset()-beforeScroll)>5 || await worldIndex()!==0)throw Error('Horizontal swipe moved the settings or the world behind it');
+    await twoFingerSwipe(settingsPoint,0,-120);
+    const afterScroll=await scrollOffset();
+    if(afterScroll<=beforeScroll+30)throw Error('Two-finger swipe up did not scroll settings');
+    await twoFingerSwipe(settingsPoint,0,120);
+    if(await scrollOffset()>=afterScroll-30)throw Error('Two-finger swipe down did not scroll settings back');
+    await page.evaluate(()=>{
+      __activeGameComponent('SettingWindow').node.active=false;
+      __gameExport('KeyListener').GoToArcadePlantDecoding();
+    });
+    await page.waitForFunction(()=>__activeGameComponent('ArcadeDecodingPlants')?.MergedCards.length>=2 &&
+      !__activeGameComponent('ArcadeDecodingPlants').confirming,null,{timeout:90000});
+    const puzzle=await page.evaluate(()=>{
+      const c=__activeGameComponent('ArcadeDecodingPlants');
+      const result=__gameExport('ArcadeDecodingPlants','ArcadeDecodingMatchingResultEnum');
+      const slots=c.MergedCards.slice(0,2);
+      slots.forEach((slot,i)=>slot.setPlant(c.CodePlants[i]));
+      slots[1].setSign(result.correct);
+      return slots.map(slot=>({point:__touchCss(slot.node.worldPosition),plant:slot.currentPlant}));
+    });
+    const puzzleContents=()=>page.evaluate(()=>__activeGameComponent('ArcadeDecodingPlants').MergedCards.slice(0,2).map(slot=>slot.currentPlant));
+    await startFinger(71,puzzle[0].point);
+    await startFinger(72,puzzle[1].point);
+    await endFinger(71);
+    if((await puzzleContents())[0]!==puzzle[0].plant)throw Error('A single release cleared the puzzle slot early');
+    await endFinger(72);
+    const cleared=await puzzleContents();
+    if(cleared[0]!=='' || cleared[1]!==puzzle[1].plant)throw Error('Puzzle chord did not clear only its first slot');
+    await startFinger(71,puzzle[1].point);
+    await startFinger(72,puzzle[0].point);
+    await endFinger(72);
+    await endFinger(71);
+    if((await puzzleContents())[1]!==puzzle[1].plant)throw Error('Puzzle chord removed a correctly guessed slot');
+    console.log('PASS: world chooser, settings and puzzle use their scoped two-finger gestures');
+
     if(logs.some(l=>l.type==='pageerror'))throw Error('Game reported a JavaScript error: '+JSON.stringify(logs));
     fs.writeFileSync(path.join(output,'state.json'),JSON.stringify({before,info,selected,after,dragInfo,preview,dragAfter},null,2));
     console.log('PASS: first lawn tap planted using real game API',JSON.stringify(after));

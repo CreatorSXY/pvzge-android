@@ -11,8 +11,8 @@
     <string name="retry">Retry</string>
     <string name="close_app">Close</string>
     <string name="gesture_click">Tap to select; tap once to plant, or drag to plant</string>
-    <string name="gesture_scroll">Two-finger swipe = Scroll</string>
-    <string name="gesture_rightclick">Two-finger tap = Right-click</string>
+    <string name="gesture_scroll">Swipe with two fingers sideways to switch worlds or vertically to scroll Settings</string>
+    <string name="gesture_rightclick">In Guess the Password, touch a slot, tap with a second finger, then lift both to clear it</string>
     <string name="longpress_rightclick">Long-press = Right-click</string>
     <string name="notification_channel_extraction">Game installation</string>
     <string name="notification_extraction_done">Game ready! Tap to play.</string>

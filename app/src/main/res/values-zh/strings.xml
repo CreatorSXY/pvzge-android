@@ -11,8 +11,8 @@
     <string name="retry">重试</string>
     <string name="close_app">关闭</string>
     <string name="gesture_click">点击选卡，再单击种植；也可拖动种植</string>
-    <string name="gesture_scroll">双指滑动 = 滚轮</string>
-    <string name="gesture_rightclick">双指点击 = 右键</string>
+    <string name="gesture_scroll">世界选择界面双指横滑切换世界，设置窗口双指上下滑动滚动列表</string>
+    <string name="gesture_rightclick">猜密码：按住要清除的格子，用第二指轻点，松开双指后清除</string>
     <string name="longpress_rightclick">长按 = 右键</string>
     <string name="notification_channel_extraction">游戏安装</string>
     <string name="notification_extraction_done">游戏已就绪！点击开始游玩。</string>

@@ -18,7 +18,10 @@
         'chunks:///_virtual/CharacterManager.ts': ['Rectangle', 'LineSegment'],
         'chunks:///_virtual/NodePools.ts': ['destroyNodeArrayPooly', 'destroyPooly'],
         'chunks:///_virtual/Conveyor.ts': ['Conveyor'],
-        'chunks:///_virtual/dropping.ts': ['dropping']
+        'chunks:///_virtual/dropping.ts': ['dropping'],
+        'chunks:///_virtual/WorldMapChooser.ts': ['WorldMapChooser'],
+        'chunks:///_virtual/SettingWindow.ts': ['SettingWindow'],
+        'chunks:///_virtual/ArcadeDecodingPlants.ts': ['ArcadeDecodingPlants']
     };
     function usable(ui) {
         var level = refs.LevelPlay && refs.LevelPlay.component;
@@ -33,6 +36,36 @@
         var screen = engine.view.convertToLocationInView(p.x, p.y, canvas.getBoundingClientRect(), new engine.Vec2());
         // Cocos converts screen pixels to its design/UI coordinates, including viewport scaling.
         return new engine.Touch(screen.x, screen.y, 0).getUILocation();
+    }
+    function activeComponent(scene, type) {
+        return type && scene.getComponentsInChildren(type).find(function (component) {
+            return component.enabledInHierarchy;
+        });
+    }
+    function hitNode(node, p) {
+        var transform = node && node.activeInHierarchy && node.getComponent(engine.UITransform);
+        return transform && transform.getBoundingBoxToWorld().contains(p);
+    }
+    function specialGesture(p) {
+        var scene = engine && engine.director && engine.director.getScene();
+        if (!scene) return null;
+        var settings = activeComponent(scene, refs.SettingWindow);
+        if (settings) {
+            var scroll = settings.scrollView;
+            return scroll && scroll.enabledInHierarchy && hitNode(scroll.node, position(p))
+                ? { kind: 'settings', scene: scene, owner: settings, target: scroll } : null;
+        }
+        var puzzle = activeComponent(scene, refs.ArcadeDecodingPlants);
+        if (puzzle) {
+            var uiPoint = position(p);
+            var slot = puzzle.MergedCards && puzzle.MergedCards.find(function (card) {
+                return hitNode(card.node, uiPoint);
+            });
+            return slot ? { kind: 'puzzle', scene: scene, owner: puzzle, target: slot } : null;
+        }
+        var chooser = activeComponent(scene, refs.WorldMapChooser);
+        return chooser && hitNode(chooser.wheelListener, position(p))
+            ? { kind: 'worlds', scene: scene, owner: chooser, target: chooser } : null;
     }
     function locate(ui, p) {
         var M = refs.Mouse, S = refs.Square;
@@ -289,6 +322,26 @@
             // Older retained/cached bundles may only contain the original touch
             // bootstrap prefix. Install wave capture outside this wrapper as well.
             if (window.PvzWaveFix) window.PvzWaveFix.captureModules(system);
+        },
+        specialGesture: specialGesture,
+        specialGestureActive: function (scope) {
+            if (engine.director.getScene() !== scope.scene || !scope.owner.enabledInHierarchy) return false;
+            if (scope.kind === 'settings') return scope.target.enabledInHierarchy;
+            if (scope.kind === 'puzzle') {
+                return scope.owner.MergedCards.includes(scope.target) && scope.target.node.activeInHierarchy;
+            }
+            return scope.owner.wheelListener.activeInHierarchy;
+        },
+        swipeSpecial: function (scope, from, to) {
+            if (scope.kind === 'worlds') {
+                if (!scope.owner.entering) scope.owner.moveBy(to.x < from.x ? 1 : -1);
+            } else if (scope.kind === 'settings') {
+                var scroll = scope.target;
+                var offset = scroll.getScrollOffset();
+                var y = offset.y + position(to).y - position(from).y;
+                scroll.scrollToOffset(new engine.Vec2(-offset.x,
+                    Math.max(0, Math.min(y, scroll.getMaxScrollOffset().y))));
+            }
         },
         begin: function (p, id) {
             var ui = refs.UIInGame && refs.UIInGame.component;
